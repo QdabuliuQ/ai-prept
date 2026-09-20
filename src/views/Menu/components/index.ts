@@ -1,29 +1,12 @@
-import { ChartPanel, ChartPanelKey } from "@/element/Chart";
-import { IconPanel, IconPanelKey } from "@/element/Icon";
-import { ImagePanel, ImagePanelKey } from "@/element/Image";
-import { MindMapPanel, MindMapPanelKey } from "@/element/MindMap";
-import { ShapePanel, ShapePanelKey } from "@/element/Shape";
-import { TablePanel, TablePanelKey } from "@/element/Table";
-import { TextPanel, TextPanelKey } from "@/element/Text";
-import { Animation } from "./Animation";
-import { Insert } from "./Insert";
 import { Play } from "./Play";
 import { Start } from "./Start";
 import { Toggle } from "./Toggle";
 import { View } from "./View";
 
+/** 轻量化菜单：页面 / 切换 / 放映 / 视图（无插入与元素属性面板） */
 export default {
   start: Start,
-  insert: Insert,
   toggle: Toggle,
-  animation: Animation,
   view: View,
   play: Play,
-  [TextPanelKey]: TextPanel,
-  [TablePanelKey]: TablePanel,
-  [IconPanelKey]: IconPanel,
-  [ImagePanelKey]: ImagePanel,
-  [MindMapPanelKey]: MindMapPanel,
-  [ChartPanelKey]: ChartPanel,
-  [ShapePanelKey]: ShapePanel,
 };

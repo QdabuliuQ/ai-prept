@@ -1,6 +1,6 @@
 "use client";
 
-import styles from "@/element/Chart/components/panel.module.less";
+import styles from "@/components/SideInspector/panel.module.less";
 import { usePPTStore } from "@/store";
 import { useChartInspectorStore } from "@/store/zustand/chartInspectorStore";
 import {

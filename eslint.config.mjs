@@ -9,8 +9,13 @@ export default tseslint.config([
       ".next/**",
       "node_modules/**",
       "out/**",
-      "cypress/**",
       "next-env.d.ts",
+      // Third-party / generated / vendored (not app source)
+      "ppt-master/**",
+      "agent/.venv/**",
+      "public/slide-editor/**",
+      "public/slide-vendor/**",
+      "scripts/build-slide-editor.js",
     ],
   },
   {

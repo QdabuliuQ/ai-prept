@@ -1,27 +1,24 @@
+/**
+ * Admin template generation jobs — spawn webppt-agent CLI.
+ * (compat layer for pptStore — page HTML only)
+ */
+
 // Export all Zustand stores
 import { usePageActiveStore } from "./pageActiveStore";
 import { usePPTStore } from "./pptStore";
 
 export { usePPTStore } from "./pptStore";
-export type { Elements, Page } from "./pptStore";
+export type { Page } from "./pptStore";
 
 export { contextMenuStore, useContextMenuStore } from "./contextMenuStore";
-export {
-  elementActiveStore,
-  useElementActiveStore,
-} from "./elementActiveStore";
 export { fullscreenStore, useFullscreenStore } from "./fullscreenStore";
 export { usePageActiveStore } from "./pageActiveStore";
 
 export {
-  copyElementStore,
   displayStatusStore,
-  elementHoverActiveStore,
   menuActiveStore,
   remarkEditActiveStore,
-  useCopyElementStore,
   useDisplayStatusStore,
-  useElementHoverActiveStore,
   useMenuActiveStore,
   useRemarkEditActiveStore,
 } from "./allStores";
@@ -32,7 +29,6 @@ export { useChartInspectorStore } from "./chartInspectorStore";
 
 export { useThemeStore, type ThemeMode } from "./themeStore";
 
-// Create compatibility layer for existing code
 class PageActiveStoreCompat {
   get pageActive() {
     return usePageActiveStore.getState().pageActive;
@@ -116,40 +112,12 @@ class PPTStoreCompat {
     usePPTStore.getState().togglePageVisible(pageId);
   };
 
-  addElement = (pageId: string, element: any) => {
-    return usePPTStore.getState().addElement(pageId, element);
+  setPageHtml = (pageId: string, html: string) => {
+    usePPTStore.getState().setPageHtml(pageId, html);
   };
 
-  addElementInfo = (pageId: string, element: any) => {
-    return usePPTStore.getState().addElement(pageId, element);
-  };
-
-  deleteElement = (pageId: string, elementId: string) => {
-    usePPTStore.getState().deleteElement(pageId, elementId);
-  };
-
-  updateElement = (pageId: string, elementId: string, updates: any) => {
-    usePPTStore.getState().updateElement(pageId, elementId, updates);
-  };
-
-  setElementInfo = (pageId: string, elementId: string, element: any) => {
-    usePPTStore.getState().setElementInfo(pageId, elementId, element);
-  };
-
-  getElement = (pageId: string, elementId: string) => {
-    return usePPTStore.getState().getElement(pageId, elementId);
-  };
-
-  getElementInfo = (pageId: string, elementId: string) => {
-    return usePPTStore.getState().getElementInfo(pageId, elementId);
-  };
-
-  getAllElementInfo = (pageId: string) => {
-    return usePPTStore.getState().getAllElementInfo(pageId);
-  };
-
-  removeElementInfo = (pageId: string, elementId: string) => {
-    usePPTStore.getState().removeElementInfo(pageId, elementId);
+  updatePageProperty = (pageId: string, property: string, value: unknown) => {
+    usePPTStore.getState().updatePageProperty(pageId, property as any, value);
   };
 
   setGridType = (type: "grid" | "line" | "none") => {
@@ -184,7 +152,7 @@ class PPTStoreCompat {
     return usePPTStore.getState().getName();
   };
 
-  setTheme = (theme: import("@/agent/types").ThemeToken) => {
+  setTheme = (theme: import("@/theme/types").ThemeToken) => {
     usePPTStore.getState().setTheme(theme);
   };
 
@@ -192,7 +160,7 @@ class PPTStoreCompat {
     return usePPTStore.getState().getTheme();
   };
 
-  applyTheme = (theme: import("@/agent/types").ThemeToken) => {
+  applyTheme = (theme: import("@/theme/types").ThemeToken) => {
     usePPTStore.getState().applyTheme(theme);
   };
 
@@ -221,6 +189,5 @@ class PPTStoreCompat {
   };
 }
 
-// Export compatibility instances
 export const pageActiveStore = new PageActiveStoreCompat();
 export const pptStore = new PPTStoreCompat();

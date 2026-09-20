@@ -220,6 +220,87 @@ html.dark .ant-popover .ant-popover-inner {
   background: var(--panel-bg-solid) !important;
 }
 
+/* 管理后台 / 公开模板库弹窗：不受编辑器暗色 --panel-bg-solid 影响 */
+.admin-flat-modal .ant-modal-content {
+  background: #ffffff !important;
+  color: rgba(0, 0, 0, 0.88);
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.admin-flat-modal .ant-modal-header {
+  margin: 0 !important;
+  padding: 16px 24px !important;
+  background: #ffffff !important;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.admin-flat-modal .ant-modal-title,
+.admin-flat-modal .ant-modal-confirm-title {
+  line-height: 1.4;
+  overflow: visible;
+  color: rgba(0, 0, 0, 0.88) !important;
+}
+
+.admin-flat-modal .ant-modal-close {
+  top: 16px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.admin-flat-modal .ant-modal-close:hover {
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.admin-flat-modal .ant-modal-body {
+  padding: 16px 24px 24px !important;
+  color: rgba(0, 0, 0, 0.88);
+  background: #ffffff !important;
+}
+
+.admin-flat-modal .ant-modal-confirm-body {
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.admin-flat-modal .ant-modal-confirm-content,
+.admin-flat-modal .ant-modal-confirm-paragraph {
+  color: rgba(0, 0, 0, 0.65) !important;
+}
+
+.admin-flat-modal .ant-modal-confirm-btns {
+  margin-top: 20px;
+}
+
+.admin-flat-modal .ant-modal-footer {
+  background: #ffffff !important;
+  border-top: 1px solid #f0f0f0;
+}
+
+/* confirm：rootClassName 在外层，className 在 .ant-modal 上 */
+.admin-flat-modal.ant-modal-confirm .ant-modal-content,
+.ant-modal-confirm.admin-flat-modal .ant-modal-content,
+.admin-flat-modal .ant-modal-confirm .ant-modal-content {
+  padding: 24px !important;
+}
+
+.admin-flat-modal.ant-modal-confirm .ant-modal-body,
+.ant-modal-confirm.admin-flat-modal .ant-modal-body,
+.admin-flat-modal .ant-modal-confirm .ant-modal-body {
+  padding: 0 !important;
+}
+
+.admin-flat-modal .ant-typography,
+.admin-flat-modal .ant-typography code {
+  color: inherit;
+}
+
+.admin-flat-modal .ant-typography.ant-typography-secondary {
+  color: rgba(0, 0, 0, 0.45) !important;
+}
+
+.admin-template-row-focus > td {
+  background: rgba(22, 119, 255, 0.06) !important;
+}
+
 .scena-guides-guide {
   background: var(--primary-color) !important;
 }

@@ -3,8 +3,10 @@
 import "@ant-design/v5-patch-for-react-19";
 import Index from "@/views/index";
 import { initPPTStore } from "@/utils/initStore";
+import { loadDocument, type PPTDocumentJSON } from "@/utils/loadDocument";
+import { installSlideEmbedBridge } from "@/utils/slideEmbedBridge";
 import "animate.css";
-import { ConfigProvider, theme as antdTheme } from "antd";
+import { ConfigProvider, theme as antdTheme, message } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import enUS from "antd/locale/en_US";
 import { useTranslation } from "react-i18next";
@@ -15,6 +17,9 @@ import { useEffect } from "react";
 
 // 在模块加载时同步初始化数据，确保在组件渲染前完成
 initPPTStore();
+installSlideEmbedBridge();
+
+const PENDING_TEMPLATE_KEY = "webppt:pending-template-doc";
 
 function AppShell() {
   const { i18n } = useTranslation();
@@ -25,6 +30,22 @@ function AppShell() {
   useEffect(() => {
     hydrateTheme();
   }, [hydrateTheme]);
+
+  // /templates 选择后写入 sessionStorage，回首页注入编辑器
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(PENDING_TEMPLATE_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(PENDING_TEMPLATE_KEY);
+      const doc = JSON.parse(raw) as PPTDocumentJSON;
+      loadDocument(doc);
+      installSlideEmbedBridge();
+      message.success(`已加载模板：${doc.name || "未命名"}`);
+    } catch {
+      sessionStorage.removeItem(PENDING_TEMPLATE_KEY);
+      message.error("模板文档无效");
+    }
+  }, []);
 
   // 根据当前语言选择antd的语言包（i18n 变更会触发重渲染，无需整页刷新）
   const antdLocale = i18n.language?.toLowerCase().startsWith("zh")

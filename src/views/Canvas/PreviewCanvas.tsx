@@ -1,81 +1,32 @@
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from "@/constants/canvas";
-import { textureItems } from "@/views/Menu/components/Start/texture";
+import {
+  SLIDE_HTML_HEIGHT,
+  SLIDE_HTML_WIDTH,
+} from "@/utils/slideHtml";
 import type { Page } from "@/store/ppt";
-import { ElementRenderer } from "@/utils/elementRenderer";
-import { type CSSProperties, type FC, useMemo } from "react";
-
-function getBackgroundStyle(page: Page): CSSProperties {
-  const backgroundType = page.backgroundType || "solidColor";
-  const background = page.background || "#fff";
-  const bgColor = page.bgColor || "#9C92AC";
-  const fgColor = page.fgColor || "#9C92AC";
-  const bgOpacity = page.bgOpacity ?? 0.4;
-  const selectedTexture = (page as Page & { selectedTexture?: string })
-    .selectedTexture;
-  const backgroundImage = (page as Page & { backgroundImage?: string })
-    .backgroundImage;
-
-  if (backgroundType === "solidColor") {
-    return {
-      backgroundColor: background,
-      backgroundImage: "none",
-    };
-  }
-
-  if (backgroundType === "image" && backgroundImage) {
-    return {
-      backgroundColor: "#ffffff",
-      backgroundImage: `url(${backgroundImage})`,
-      backgroundSize: "cover",
-      backgroundPosition: "center",
-      backgroundRepeat: "no-repeat",
-    };
-  }
-
-  if (backgroundType === "texture" && selectedTexture) {
-    const textureItem = textureItems.find(
-      (item) => item.type === selectedTexture
-    );
-    let textureBackgroundImage = textureItem?.style.backgroundImage || "";
-
-    if (textureBackgroundImage) {
-      const encodedFgColor = fgColor.replace("#", "%23");
-      textureBackgroundImage = textureBackgroundImage.replace(
-        /fill='%23[0-9A-Fa-f]{6}'/g,
-        `fill='${encodedFgColor}'`
-      );
-      textureBackgroundImage = textureBackgroundImage.replace(
-        /fill-opacity='[^']*'/g,
-        `fill-opacity='${bgOpacity}'`
-      );
-    }
-
-    return {
-      backgroundColor: bgColor,
-      backgroundImage: textureBackgroundImage,
-    };
-  }
-
-  return {
-    backgroundColor: "#fff",
-    backgroundImage: "none",
-  };
-}
+import { HtmlSlideFrame } from "@/views/Canvas/HtmlSlideFrame";
+import { type FC } from "react";
 
 export interface PreviewCanvasProps {
   page: Page;
   previewZoom?: number;
+  /**
+   * design：1920×1080 原尺寸（缩略图/导出截图，默认）
+   * canvas：缩放到编辑器画布尺寸（少用）
+   */
+  fit?: "canvas" | "design";
 }
 
 /**
- * 轻量预览画布：无标尺/选中/备注/全屏等编辑态逻辑，仅渲染背景与元素。
- * 供侧栏缩略图生成、Grid 预览、exportPageAsImage 等场景使用。
+ * 轻量预览画布：/embed/slide iframe 渲染 page.html（无标尺/选中/备注）。
+ * 供侧栏缩略图、Grid、exportPageAsImage 等使用。
  */
 export const PreviewCanvas: FC<PreviewCanvasProps> = ({
   page,
   previewZoom,
+  fit = "design",
 }) => {
-  const backgroundStyle = useMemo(() => getBackgroundStyle(page), [page]);
+  const w = fit === "design" ? SLIDE_HTML_WIDTH : undefined;
+  const h = fit === "design" ? SLIDE_HTML_HEIGHT : undefined;
 
   return (
     <div
@@ -86,18 +37,22 @@ export const PreviewCanvas: FC<PreviewCanvasProps> = ({
         id={`preview-canvas-container-${page.id}`}
         className="absolute overflow-hidden"
         style={{
-          width: CANVAS_WIDTH,
-          height: CANVAS_HEIGHT,
-          left: "50%",
-          top: "50%",
-          marginLeft: -CANVAS_WIDTH / 2,
-          marginTop: -CANVAS_HEIGHT / 2,
-          transform: "scale(1)",
-          transformOrigin: "center center",
-          ...backgroundStyle,
+          width: w ?? "100%",
+          height: h ?? "100%",
+          left: fit === "design" ? 0 : "50%",
+          top: fit === "design" ? 0 : "50%",
+          marginLeft: fit === "design" ? 0 : undefined,
+          marginTop: fit === "design" ? 0 : undefined,
+          transform: fit === "design" ? undefined : "translate(-50%, -50%)",
+          backgroundColor: "#111",
         }}
       >
-        <ElementRenderer elements={page.elements} mode="preview" />
+        <HtmlSlideFrame
+          page={page}
+          fit={fit}
+          pointerEventsNone
+          title={`preview-${page.id}`}
+        />
       </div>
     </div>
   );

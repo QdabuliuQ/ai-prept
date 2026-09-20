@@ -1,78 +1,12 @@
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "@/constants/canvas";
-import {
-  ChartPanelIcon,
-  ChartPanelKey,
-  Name as ChartName,
-} from "@/element/Chart";
-import {
-  IconPanelIcon,
-  IconPanelKey,
-  Name as IconName,
-} from "@/element/Icon";
-import {
-  ImagePanelIcon,
-  ImagePanelKey,
-  Name as ImageName,
-} from "@/element/Image";
-import {
-  MindMapPanelIcon,
-  MindMapPanelKey,
-  Name as MindMapName,
-} from "@/element/MindMap";
-import {
-  Name as ShapeName,
-  ShapePanelIcon,
-  ShapePanelKey,
-} from "@/element/Shape";
-import {
-  Name as TableName,
-  TablePanelIcon,
-  TablePanelKey,
-} from "@/element/Table";
-import { PlacementMapped } from "@/element/Text/constant";
-import {
-  Name as TextName,
-  TextPanelIcon,
-  TextPanelKey,
-} from "@/element/Text";
 import { snapdom } from "@zumer/snapdom";
 import * as _ from "lodash";
-import type { ComponentType } from "react";
 import { createRoot } from "react-dom/client";
 
-/**
- * 元素面板信息类型
- */
-export interface ElementPanelInfo {
-  key: string;
-  name: string;
-  // icon-park / antd icons have varied prop types; keep loose for registry
-  icon?: ComponentType<any>;
-}
-
-/** 显式注册所有元素面板（替代 Vite import.meta.glob） */
-const ELEMENT_PANEL_REGISTRY: ElementPanelInfo[] = [
-  { key: ChartPanelKey, name: ChartName, icon: ChartPanelIcon },
-  { key: IconPanelKey, name: IconName, icon: IconPanelIcon },
-  { key: ImagePanelKey, name: ImageName, icon: ImagePanelIcon },
-  { key: MindMapPanelKey, name: MindMapName, icon: MindMapPanelIcon },
-  { key: ShapePanelKey, name: ShapeName, icon: ShapePanelIcon },
-  { key: TablePanelKey, name: TableName, icon: TablePanelIcon },
-  { key: TextPanelKey, name: TextName, icon: TextPanelIcon },
-];
-
-/**
- * 深拷贝对象
- * 使用 lodash 的 cloneDeep 方法
- *
- * @param obj - 要拷贝的对象
- * @returns 深拷贝后的新对象
- */
 export function cloneDeep<T>(obj: T): T {
   if (obj === null || obj === undefined) {
     return obj;
   }
-
   return _.cloneDeep(obj);
 }
 
@@ -81,45 +15,6 @@ export function getRandomId() {
     Math.random().toString(36).substring(2, 15) +
     Math.random().toString(36).substring(2, 15)
   );
-}
-
-/**
- * 与 PPT 段落对齐一致：水平用 textAlign，垂直用 column flex。
- * PlacementMapped key = `水平-垂直`（如 left-center）
- */
-export function placementConvey(placement: keyof typeof PlacementMapped) {
-  const key = (placement in PlacementMapped
-    ? placement
-    : "left-top") as keyof typeof PlacementMapped;
-  const [h = "left", v = "top"] = key.split("-");
-  const textAlign =
-    h === "center" ? "center" : h === "right" ? "right" : "left";
-  const justifyContent =
-    v === "center" ? "center" : v === "bottom" ? "flex-end" : "flex-start";
-  return {
-    display: "flex",
-    flexDirection: "column" as const,
-    justifyContent,
-    alignItems: "stretch" as const,
-    textAlign: textAlign as "left" | "center" | "right",
-  };
-}
-
-/**
- * 获取 element 目录下所有组件的面板信息（显式 registry，兼容 Next.js）
- *
- * @returns 返回包含所有组件面板信息的数组，按 key 排序
- */
-export function getAllElementPanelInfo(): ElementPanelInfo[] {
-  const elementPanels: ElementPanelInfo[] = ELEMENT_PANEL_REGISTRY.map(
-    ({ key, name, icon }) => ({
-      key,
-      name,
-      ...(icon && { icon }),
-    })
-  );
-
-  return elementPanels.sort((a, b) => a.key.localeCompare(b.key));
 }
 
 /**

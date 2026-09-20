@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webppt-agent"
+version = "0.3.0"
+description = "Python agent: PPT Master pipeline → html-slide template packages"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "openai>=1.40.0",
+  "python-dotenv>=1.0.0",
+  "Pillow>=10.0.0",
+  "colorspacious>=1.1.2",
+  "numpy>=1.24.0",
+]
+
+[project.scripts]
+webppt-agent = "webppt_agent.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

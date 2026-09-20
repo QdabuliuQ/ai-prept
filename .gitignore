@@ -6,15 +6,19 @@ node_modules
 out/
 next-env.d.ts
 
-# Agent output
+# Agent output (TS packs pipeline)
 agent-output/
 .agent-output/
-public/agent-assets/
 
-# Cypress
-cypress/videos
-cypress/screenshots
-cypress/downloads
+# Python agent
+agent/.venv/
+agent/output/
+agent/**/__pycache__/
+*.egg-info/
+.eggs/
+
+# Third-party: PPT Master (ZIP / local install + venv)
+ppt-master/
 
 # Build / misc
 dist

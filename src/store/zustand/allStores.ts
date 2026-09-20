@@ -24,47 +24,6 @@ class DisplayStatusStoreCompat {
 
 export const displayStatusStore = new DisplayStatusStoreCompat();
 
-// Element Hover Active Store
-interface ElementHoverActiveState {
-  elementHoverActive: string | null;
-  setElementHoverActive: (elementHoverActive: string | null) => void;
-  getElementHoverActive: () => string | null;
-  resetElementHoverActive: () => void;
-  isElementHoverActive: (elementHoverActive: string) => boolean;
-}
-
-export const useElementHoverActiveStore = create<ElementHoverActiveState>(
-  (set, get) => ({
-    elementHoverActive: null,
-    setElementHoverActive: (elementHoverActive) => set({ elementHoverActive }),
-    getElementHoverActive: () => get().elementHoverActive,
-    resetElementHoverActive: () => set({ elementHoverActive: null }),
-    isElementHoverActive: (elementHoverActive) =>
-      get().elementHoverActive === elementHoverActive,
-  })
-);
-
-class ElementHoverActiveStoreCompat {
-  setElementHoverActive = (elementHoverActive: string | null) => {
-    useElementHoverActiveStore
-      .getState()
-      .setElementHoverActive(elementHoverActive);
-  };
-  getElementHoverActive = () => {
-    return useElementHoverActiveStore.getState().getElementHoverActive();
-  };
-  resetElementHoverActive = () => {
-    useElementHoverActiveStore.getState().resetElementHoverActive();
-  };
-  isElementHoverActive = (elementHoverActive: string) => {
-    return useElementHoverActiveStore
-      .getState()
-      .isElementHoverActive(elementHoverActive);
-  };
-}
-
-export const elementHoverActiveStore = new ElementHoverActiveStoreCompat();
-
 // Menu Active Store
 interface MenuActiveState {
   menuActive: string | null;
@@ -96,7 +55,6 @@ class MenuActiveStoreCompat {
     return useMenuActiveStore.getState().getMenuActive();
   };
   resetMenu = () => {
-    console.log("resetMenu");
     useMenuActiveStore.getState().resetMenu();
   };
   setActiveMenu = (menuActive: string | null) => {
@@ -124,7 +82,7 @@ export const useRemarkEditActiveStore = create<RemarkEditActiveState>(
     getRemarkEditActive: () => get().remarkEditActive,
     toggleRemarkEditActive: () =>
       set({ remarkEditActive: !get().remarkEditActive }),
-  })
+  }),
 );
 
 class RemarkEditActiveStoreCompat {
@@ -140,48 +98,3 @@ class RemarkEditActiveStoreCompat {
 }
 
 export const remarkEditActiveStore = new RemarkEditActiveStoreCompat();
-
-// Copy Element Store
-interface CopyElementState {
-  copiedElement: any | null;
-  setCopiedElement: (element: any | null) => void;
-  getCopiedElement: () => any | null;
-  clearCopiedElement: () => void;
-  hasCopiedElement: () => boolean;
-}
-
-export const useCopyElementStore = create<CopyElementState>((set, get) => ({
-  copiedElement: null,
-
-  setCopiedElement: (element) => {
-    // 使用简单的深拷贝
-    const copied = element ? JSON.parse(JSON.stringify(element)) : null;
-    set({ copiedElement: copied });
-  },
-
-  getCopiedElement: () => {
-    const element = get().copiedElement;
-    return element ? JSON.parse(JSON.stringify(element)) : null;
-  },
-
-  clearCopiedElement: () => set({ copiedElement: null }),
-
-  hasCopiedElement: () => get().copiedElement !== null,
-}));
-
-class CopyElementStoreCompat {
-  setCopiedElement = (element: any | null) => {
-    useCopyElementStore.getState().setCopiedElement(element);
-  };
-  getCopiedElement = () => {
-    return useCopyElementStore.getState().getCopiedElement();
-  };
-  clearCopiedElement = () => {
-    useCopyElementStore.getState().clearCopiedElement();
-  };
-  hasCopiedElement = () => {
-    return useCopyElementStore.getState().hasCopiedElement();
-  };
-}
-
-export const copyElementStore = new CopyElementStoreCompat();

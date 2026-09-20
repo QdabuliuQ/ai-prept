@@ -1,8 +1,8 @@
-import type { ThemeToken } from "@/agent/types";
+import type { ThemeToken } from "./types";
 
 export type ThemePreset = ThemeToken & { id: string };
 
-const FONT = "PingFang SC";
+const FONT = "Noto Serif SC";
 
 function t(
   id: string,

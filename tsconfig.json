@@ -17,7 +17,9 @@
     "plugins": [{ "name": "next" }],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@webppt/html-to-pptx": ["./packages/html-to-pptx/src/index.ts"],
+      "@webppt/html-to-pptx/*": ["./packages/html-to-pptx/src/*"]
     },
     "noUnusedLocals": true,
     "noUnusedParameters": true,
@@ -30,7 +32,8 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.d.ts",
+    "packages/html-to-pptx/src/**/*.ts",
     ".next/types/**/*.ts"
   ],
-  "exclude": ["node_modules", "cypress"]
+  "exclude": ["node_modules"]
 }

@@ -1,3 +1,1 @@
-// Type re-export for compatibility
-export type { Page, Elements } from "./zustand/pptStore";
-
+export type { Page } from "./zustand/pptStore";

@@ -1,0 +1,23 @@
+{
+  "skill_name": "webppt-image-director",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "为一套 7 页校园足球发布会模板规划 Nano Banana 配图。封面左侧放标题，右侧需要人物主视觉；章节页和愿景页也需要图，要求整套风格一致且正文可编辑。",
+      "expected_output": "A compact image-direction manifest using WebPPT fields, one reusable visual lock, correct slot-specific ratios and copy-safe regions, and no rasterized slide text or diagrams.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "现有品牌十周年 PPT 的 AI 配图每页风格都不一样，封面人物还挡住了标题。请给出 Nano Banana 重生成方案，控制成本但保证最终 2K 质量。",
+      "expected_output": "A draft-select-final workflow with an accepted anchor reference, single-change retries, explicit title-safe composition, suite consistency rules, and 2K only for selected finals.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "给 3:4 竖侧栏生成一张 STEAM 教育实验室配图，并说明你会如何验收它能安全嵌入 PPT，而不是单独看起来好看。",
+      "expected_output": "A subject-first prompt for the exact 3:4 panel crop plus QA against real slide placement, copy-safe area, no text/logo, edge integration, and technical format checks.",
+      "files": []
+    }
+  ]
+}

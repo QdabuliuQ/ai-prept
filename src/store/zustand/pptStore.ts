@@ -1,33 +1,18 @@
-import type { ThemeToken } from "@/agent/types";
-import type { IChartProps } from "@/element/Chart";
-import type { IIconProps } from "@/element/Icon";
-import type { IImageProps } from "@/element/Image";
-import type { IShapeProps } from "@/element/Shape";
-import type { ITableProps } from "@/element/Table";
-import type { ITextProps } from "@/element/Text";
-import {
-  MAX_ELEMENTS_PER_PAGE,
-  MAX_PAGES,
-} from "@/constants/limits";
+import type { ThemeToken } from "@/theme/types";
+import { MAX_PAGES } from "@/constants/limits";
 import i18n from "@/i18n";
 import { applyDocumentTheme, DEFAULT_PPT_THEME, toThemeToken } from "@/theme";
-import type { IMindMapProps } from "@/types/element";
 import { getRandomId } from "@/utils";
 import { message } from "antd";
 import { create } from "zustand";
 
-export type Elements =
-  | ITextProps
-  | ITableProps
-  | IIconProps
-  | IImageProps
-  | IMindMapProps
-  | IChartProps
-  | IShapeProps;
-
 export type Page = {
   id: string;
-  elements: Array<Elements>;
+  /**
+   * 页级 HTML（画布用沙箱 iframe 渲染的主内容）。
+   * 缺省时由 `buildBlankSlideHtml` 生成空白页。
+   */
+  html?: string;
   visible: boolean;
   toggleInAnimation: string;
   toggleInDuration: string;
@@ -48,6 +33,25 @@ export type Page = {
 
 type IPage = Array<Page>;
 
+function createBlankPage(): Page {
+  return {
+    id: `page_${getRandomId()}`,
+    html: undefined,
+    visible: true,
+    toggleInAnimation: "backInLeft",
+    toggleInDuration: "default",
+    toggleInDelay: "0s",
+    autoToggle: false,
+    autoToggleTime: 5,
+    backgroundType: "solidColor",
+    background: "#fff",
+    bgColor: "#e4e4e4",
+    fgColor: "#9C92AC",
+    bgOpacity: 0.4,
+    remark: "",
+  };
+}
+
 interface PPTState {
   name: string;
   theme: ThemeToken;
@@ -60,7 +64,6 @@ interface PPTState {
   keyboardToggle: boolean;
   pages: IPage;
 
-  // Actions
   setKeyboardToggle: (value: boolean) => void;
   getKeyboardToggle: () => boolean;
 
@@ -104,30 +107,13 @@ interface PPTState {
   updatePageProperty: (
     pageId: string,
     property: keyof Page,
-    value: any
+    value: unknown,
   ) => void;
-
-  // Element operations
-  addElement: (pageId: string, element: Elements) => boolean;
-  deleteElement: (pageId: string, elementId: string) => void;
-  updateElement: (
-    pageId: string,
-    elementId: string,
-    updates: Partial<Elements>
-  ) => void;
-  setElementInfo: (
-    pageId: string,
-    elementId: string,
-    element: Elements
-  ) => void;
-  getElement: (pageId: string, elementId: string) => Elements | undefined;
-  getElementInfo: (pageId: string, elementId: string) => Elements | null;
-  getAllElementInfo: (pageId: string) => Elements[];
-  removeElementInfo: (pageId: string, elementId: string) => void;
+  /** 更新页级 HTML（画布 iframe 主内容） */
+  setPageHtml: (pageId: string, html: string) => void;
 }
 
 export const usePPTStore = create<PPTState>((set, get) => ({
-  // Initial state
   name: "",
   theme: toThemeToken(DEFAULT_PPT_THEME),
   gridSize: 20,
@@ -139,39 +125,30 @@ export const usePPTStore = create<PPTState>((set, get) => ({
   keyboardToggle: true,
   pages: [],
 
-  // Keyboard toggle
   setKeyboardToggle: (value) => set({ keyboardToggle: value }),
   getKeyboardToggle: () => get().keyboardToggle,
 
-  // Guide line show
   setGuideLineShow: (value) => set({ guideLineShow: value }),
   getGuideLineShow: () => get().guideLineShow,
 
-  // Grid type
   setGridType: (type) => set({ gridType: type }),
   getGridType: () => get().gridType,
 
-  // Grid size
   setGridSize: (value) => set({ gridSize: value }),
   getGridSize: () => get().gridSize,
 
-  // Vertical line
   setVerticalLine: (lines) => set({ verticalLine: lines }),
   getVerticalLine: () => get().verticalLine,
 
-  // Horizontal line
   setHorizontalLine: (lines) => set({ horizontalLine: lines }),
   getHorizontalLine: () => get().horizontalLine,
 
-  // Rule
   setRule: (value) => set({ rule: value }),
   getRule: () => get().rule,
 
-  // Name
   setName: (value) => set({ name: value }),
   getName: () => get().name,
 
-  // Theme
   setTheme: (theme) => set({ theme }),
   getTheme: () => get().theme,
   applyTheme: (theme) => {
@@ -180,7 +157,6 @@ export const usePPTStore = create<PPTState>((set, get) => ({
     set({ theme, pages });
   },
 
-  // Pages
   setPages: (pages) => set({ pages: [...pages] }),
 
   getActivePage: (pageId) => {
@@ -191,30 +167,13 @@ export const usePPTStore = create<PPTState>((set, get) => ({
 
   resetPages: () => set({ pages: [] }),
 
-  // Add page
   addPage: (afterPageId?) => {
     if (get().pages.length >= MAX_PAGES) {
       message.warning(i18n.t("limits.maxPages", { count: MAX_PAGES }));
       return null;
     }
 
-    const newPage: Page = {
-      id: `page_${getRandomId()}`,
-      elements: [],
-      visible: true,
-      toggleInAnimation: "backInLeft",
-      toggleInDuration: "default",
-      toggleInDelay: "0s",
-      autoToggle: false,
-      autoToggleTime: 5,
-      backgroundType: "solidColor",
-      background: "#fff",
-      bgColor: "#e4e4e4",
-      fgColor: "#9C92AC",
-      bgOpacity: 0.4,
-      remark: "",
-    };
-
+    const newPage = createBlankPage();
     const currentPages = get().pages;
     let newPages: IPage = [];
 
@@ -237,7 +196,6 @@ export const usePPTStore = create<PPTState>((set, get) => ({
     return newPage.id;
   },
 
-  // Duplicate page
   duplicatePage: (pageId) => {
     if (get().pages.length >= MAX_PAGES) {
       message.warning(i18n.t("limits.maxPages", { count: MAX_PAGES }));
@@ -246,22 +204,15 @@ export const usePPTStore = create<PPTState>((set, get) => ({
 
     const currentPages = get().pages;
     const pageIndex = currentPages.findIndex((page) => page.id === pageId);
-
     if (pageIndex === -1) return null;
 
     const originalPage = currentPages[pageIndex];
-
-    // 深拷贝页面，生成新的 ID
     const duplicatedPage: Page = {
       ...originalPage,
       id: `page_${getRandomId()}`,
-      elements: originalPage.elements.map((element) => ({
-        ...element,
-        id: `${element.type}_${getRandomId()}`,
-      })),
+      html: originalPage.html,
     };
 
-    // 在原页面后面插入复制的页面
     const newPages = [
       ...currentPages.slice(0, pageIndex + 1),
       duplicatedPage,
@@ -272,7 +223,6 @@ export const usePPTStore = create<PPTState>((set, get) => ({
     return duplicatedPage.id;
   },
 
-  // Delete page
   deletePage: (pageId) => {
     const currentPages = get().pages;
     if (currentPages.length <= 1) return false;
@@ -282,7 +232,6 @@ export const usePPTStore = create<PPTState>((set, get) => ({
     return true;
   },
 
-  // Move page
   movePage: (pageId, direction) => {
     const currentPages = get().pages;
     const index = currentPages.findIndex((page) => page.id === pageId);
@@ -300,117 +249,29 @@ export const usePPTStore = create<PPTState>((set, get) => ({
     } else if (direction === "last") {
       newPages.push(movedPage);
     } else {
-      // 如果方向不合法或无法移动，恢复原数组
       newPages.splice(index, 0, movedPage);
     }
 
     set({ pages: newPages });
   },
 
-  // Toggle page visible
   togglePageVisible: (pageId) => {
     const currentPages = get().pages;
     const newPages = currentPages.map((page) =>
-      page.id === pageId ? { ...page, visible: !page.visible } : page
+      page.id === pageId ? { ...page, visible: !page.visible } : page,
     );
     set({ pages: newPages });
   },
 
-  // Update page property
   updatePageProperty: (pageId, property, value) => {
     const currentPages = get().pages;
     const newPages = currentPages.map((page) =>
-      page.id === pageId ? { ...page, [property]: value } : page
+      page.id === pageId ? { ...page, [property]: value } : page,
     );
     set({ pages: newPages });
   },
 
-  // Add element
-  addElement: (pageId, element) => {
-    const currentPages = get().pages;
-    const page = currentPages.find((p) => p.id === pageId);
-    if (!page) return false;
-
-    if (page.elements.length >= MAX_ELEMENTS_PER_PAGE) {
-      message.warning(
-        i18n.t("limits.maxElements", { count: MAX_ELEMENTS_PER_PAGE })
-      );
-      return false;
-    }
-
-    const newPages = currentPages.map((p) =>
-      p.id === pageId ? { ...p, elements: [...p.elements, element] } : p
-    );
-    set({ pages: newPages });
-    return true;
-  },
-
-  // Delete element
-  deleteElement: (pageId, elementId) => {
-    const currentPages = get().pages;
-    const newPages = currentPages.map((page) =>
-      page.id === pageId
-        ? {
-            ...page,
-            elements: page.elements.filter((el) => el.id !== elementId),
-          }
-        : page
-    );
-    set({ pages: newPages });
-  },
-
-  // Update element
-  updateElement: (pageId, elementId, updates) => {
-    const currentPages = get().pages;
-    const newPages = currentPages.map((page) =>
-      page.id === pageId
-        ? {
-            ...page,
-            elements: page.elements.map((el) =>
-              el.id === elementId ? ({ ...el, ...updates } as Elements) : el
-            ),
-          }
-        : page
-    );
-    set({ pages: newPages });
-  },
-
-  // Set element info
-  setElementInfo: (pageId, elementId, element) => {
-    const currentPages = get().pages;
-    const newPages = currentPages.map((page) =>
-      page.id === pageId
-        ? {
-            ...page,
-            elements: page.elements.map((el) =>
-              el.id === elementId ? element : el
-            ),
-          }
-        : page
-    );
-    set({ pages: newPages });
-  },
-
-  // Get element
-  getElement: (pageId, elementId) => {
-    const page = get().pages.find((p) => p.id === pageId);
-    return page?.elements.find((el) => el.id === elementId);
-  },
-
-  // Get element info (alias for compatibility)
-  getElementInfo: (pageId, elementId) => {
-    const page = get().pages.find((p) => p.id === pageId);
-    return page?.elements.find((el) => el.id === elementId) || null;
-  },
-
-  // Get all element info
-  getAllElementInfo: (pageId) => {
-    const page = get().pages.find((p) => p.id === pageId);
-    return page?.elements || [];
-  },
-
-  // Remove element info (alias for compatibility)
-  removeElementInfo: (pageId, elementId) => {
-    get().deleteElement(pageId, elementId);
+  setPageHtml: (pageId, html) => {
+    get().updatePageProperty(pageId, "html", html);
   },
 }));

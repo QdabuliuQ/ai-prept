@@ -1,11 +1,15 @@
-import { CANVAS_HEIGHT, CANVAS_WIDTH } from "@/constants/canvas";
 import type { Page } from "@/store/ppt";
+import {
+  SLIDE_HTML_HEIGHT,
+  SLIDE_HTML_WIDTH,
+} from "@/utils/slideHtml";
 import { snapdom } from "@zumer/snapdom";
 import { createElement, useEffect, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 const DEBOUNCE_MS = 400;
-const CONCURRENCY = 1;
-const SNAP_SCALE = 0.4;
+/** 离屏截图并发：保持较低，避免同时挂载过多 /embed iframe */
+const CONCURRENCY = 2;
+const SNAP_SCALE = 0.25;
 const JPEG_QUALITY = 0.72;
 
 type CacheEntry = {
@@ -49,7 +53,7 @@ export function isThumbnailLoading(page: Page): boolean {
 
 export function getPageFingerprint(page: Page): string {
   return JSON.stringify({
-    elements: page.elements,
+    html: page.html ?? "",
     backgroundType: page.backgroundType,
     background: page.background,
     bgColor: page.bgColor,
@@ -89,7 +93,8 @@ function delay(ms: number) {
 }
 
 /**
- * 离屏渲染轻量 PreviewCanvas，生成低分辨率 JPEG 缩略图。
+ * 离屏渲染轻量 PreviewCanvas（1920×1080 原尺寸），生成缩略图。
+ * 不用 CSS transform 缩小后再截：snapdom 等会忽略 transform，导致只剩左上角。
  */
 export async function generatePageThumbnail(
   page: Page
@@ -101,31 +106,33 @@ export async function generatePageThumbnail(
   }
 
   const { PreviewCanvas } = await import("@/views/Canvas/PreviewCanvas");
+  const { installSlideEmbedBridge } = await import("@/utils/slideEmbedBridge");
+  installSlideEmbedBridge();
 
   const tempContainer = document.createElement("div");
   tempContainer.style.position = "fixed";
   tempContainer.style.left = "-9999px";
   tempContainer.style.top = "0";
-  tempContainer.style.width = `${CANVAS_WIDTH}px`;
-  tempContainer.style.height = `${CANVAS_HEIGHT}px`;
+  tempContainer.style.width = `${SLIDE_HTML_WIDTH}px`;
+  tempContainer.style.height = `${SLIDE_HTML_HEIGHT}px`;
   tempContainer.style.backgroundColor = "#fff";
   tempContainer.style.overflow = "hidden";
   tempContainer.style.pointerEvents = "none";
   document.body.appendChild(tempContainer);
 
   const canvasWrapper = document.createElement("div");
-  canvasWrapper.style.width = `${CANVAS_WIDTH}px`;
-  canvasWrapper.style.height = `${CANVAS_HEIGHT}px`;
+  canvasWrapper.style.width = `${SLIDE_HTML_WIDTH}px`;
+  canvasWrapper.style.height = `${SLIDE_HTML_HEIGHT}px`;
   canvasWrapper.style.position = "relative";
   canvasWrapper.style.backgroundColor = "#fff";
   tempContainer.appendChild(canvasWrapper);
 
   const root = createRoot(canvasWrapper);
-  root.render(createElement(PreviewCanvas, { page }));
+  root.render(createElement(PreviewCanvas, { page, fit: "design" }));
 
   try {
-    await delay(120);
-
+    await delay(50);
+    const iframe = canvasWrapper.querySelector("iframe");
     const canvasElement = canvasWrapper.querySelector(
       `#preview-canvas-container-${page.id}`
     ) as HTMLElement | null;
@@ -134,7 +141,23 @@ export async function generatePageThumbnail(
       return null;
     }
 
-    const images = canvasElement.querySelectorAll("img");
+    /** 优先截 iframe 内幻灯片根节点（same-origin），比只截外壳更稳 */
+    let captureTarget: HTMLElement = canvasElement;
+    if (iframe) {
+      try {
+        const { waitForSlideRoot } = await import(
+          "@/utils/pptx/htmlSlideMount"
+        );
+        const slideRoot = await waitForSlideRoot(iframe);
+        captureTarget = slideRoot;
+      } catch {
+        await delay(200);
+      }
+    } else {
+      await delay(200);
+    }
+
+    const images = captureTarget.querySelectorAll("img");
     await Promise.all(
       Array.from(images).map(
         (img) =>
@@ -159,17 +182,16 @@ export async function generatePageThumbnail(
 
     await delay(80);
 
-    const canvas = await snapdom.toCanvas(canvasElement, {
+    const canvas = await snapdom.toCanvas(captureTarget, {
       scale: SNAP_SCALE,
       backgroundColor: "#fff",
-      width: CANVAS_WIDTH,
-      height: CANVAS_HEIGHT,
+      width: SLIDE_HTML_WIDTH,
+      height: SLIDE_HTML_HEIGHT,
       cache: "disabled",
     });
 
     const dataUrl = canvas.toDataURL("image/jpeg", JPEG_QUALITY);
     cache.set(page.id, { url: dataUrl, fingerprint });
-    // 生成成功后清掉残留防抖，避免 pending 卡住
     const timer = debounceTimers.get(page.id);
     if (timer) clearTimeout(timer);
     debounceTimers.delete(page.id);

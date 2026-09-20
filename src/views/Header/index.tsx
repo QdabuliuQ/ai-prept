@@ -1,20 +1,7 @@
 import { LanguageSwitcher, ThemeSwitcher } from "@/components";
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "@/constants/canvas";
-import { ChartPanelKey, ChartPanelTitle } from "@/element/Chart";
 import { useTranslation } from "react-i18next";
-import { IconPanelKey, IconPanelTitle } from "@/element/Icon";
-import { ImagePanelKey, ImagePanelTitle } from "@/element/Image";
-import { MindMapPanelKey, MindMapPanelTitle } from "@/element/MindMap";
-import { ShapePanelKey, ShapePanelTitle } from "@/element/Shape";
-import { TablePanelKey, TablePanelTitle } from "@/element/Table";
-import { TextPanelKey, TextPanelTitle } from "@/element/Text";
-import {
-  useElementActiveStore,
-  useMenuActiveStore,
-  usePageActiveStore,
-  usePPTStore,
-} from "@/store";
-import { downloadPptxFromApi } from "@/services/exportPptx";
+import { useMenuActiveStore, usePPTStore } from "@/store";
 import { loadDocument, parsePPTDocumentJSON } from "@/utils/loadDocument";
 import { exportPageAsImage } from "@/utils/tool";
 import { LoadingOutlined } from "@ant-design/icons";
@@ -30,36 +17,7 @@ import { Button, Tooltip, message } from "antd";
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FC } from "react";
 import styles from "./index.module.less";
 
-const MenuMapped = {
-  text: {
-    key: TextPanelKey,
-    title: TextPanelTitle,
-  },
-  table: {
-    key: TablePanelKey,
-    title: TablePanelTitle,
-  },
-  icon: {
-    key: IconPanelKey,
-    title: IconPanelTitle,
-  },
-  image: {
-    key: ImagePanelKey,
-    title: ImagePanelTitle,
-  },
-  mindmap: {
-    key: MindMapPanelKey,
-    title: MindMapPanelTitle,
-  },
-  chart: {
-    key: ChartPanelKey,
-    title: ChartPanelTitle,
-  },
-  shape: {
-    key: ShapePanelKey,
-    title: ShapePanelTitle,
-  },
-};
+const LIGHT_MENU_KEYS = new Set(["start", "toggle", "play", "view"]);
 
 export const Header: FC = () => {
   const { t } = useTranslation();
@@ -68,10 +26,6 @@ export const Header: FC = () => {
       {
         label: t("menu.start"),
         key: "start",
-      },
-      {
-        label: t("menu.insert"),
-        key: "insert",
       },
       {
         label: t("menu.toggle"),
@@ -89,78 +43,23 @@ export const Header: FC = () => {
     [t]
   );
 
-  // 使用 Zustand hook 订阅状态变化，确保组件能够响应状态更新
   const menuActive = useMenuActiveStore((state) => state.menuActive);
   const setActiveMenu = useMenuActiveStore((state) => state.setActiveMenu);
-  const pageActive = usePageActiveStore((state) => state.pageActive);
-  const elementActive = useElementActiveStore((state) => state.elementActive);
-  const getElementInfo = usePPTStore((state) => state.getElementInfo);
 
-  const [elementPanel, setElementPanel] = useState<{
-    key: string;
-    title: string;
-  } | null>(null);
-
-  // 使用 ref 跟踪上一次的 elementActive，用于判断元素是否刚被选中或切换
-  const prevElementActiveRef = useRef<string | null>(null);
-  // 使用 ref 跟踪上一次的 elementPanel key，用于判断是否需要自动切换
-  const prevElementPanelKeyRef = useRef<string | null>(null);
-
+  // 预加载 html-to-pptx 导出分包（含 pptxgenjs，约 2MB），避免首次点导出时 ChunkLoadError
   useEffect(() => {
-    const prevElementActive = prevElementActiveRef.current;
-    const isElementJustSelected =
-      elementActive !== null && prevElementActive === null;
-    const isElementJustDeselected =
-      elementActive === null && prevElementActive !== null;
-    const isElementSwitched =
-      elementActive !== null &&
-      prevElementActive !== null &&
-      elementActive !== prevElementActive;
+    void import("@/services/exportHtmlToPptx").catch(() => {
+      /* 忽略预取失败；真正导出时再报错 */
+    });
+  }, []);
 
-    // 更新 ref
-    prevElementActiveRef.current = elementActive;
-
-    if (pageActive && elementActive) {
-      // 重新获取元素信息，确保获取到最新的数据
-      const element = getElementInfo(pageActive, elementActive);
-
-      if (element) {
-        // 检查元素类型是否在 MenuMapped 中
-        const elementType = element.type as keyof typeof MenuMapped;
-        if (MenuMapped[elementType]) {
-          const panel = MenuMapped[elementType];
-          setElementPanel(panel);
-
-          // 当元素刚被选中或切换到新元素时，自动切换到对应的 panel
-          // 如果元素已经选中且没有切换（elementActive 没变），则保持当前 menuActive，允许用户手动切换
-          const shouldAutoSwitch = isElementJustSelected || isElementSwitched;
-
-          if (shouldAutoSwitch) {
-            setActiveMenu(panel.key);
-            prevElementPanelKeyRef.current = panel.key;
-          }
-          return;
-        }
-      }
-    }
-
-    // 元素取消选中时，清除 elementPanel 并切换到 start
-    if (isElementJustDeselected) {
-      setElementPanel(null);
+  // 旧版「插入 / 元素属性 / 动画」面板已下线，落在无效 key 时回到页面
+  useEffect(() => {
+    if (!menuActive || !LIGHT_MENU_KEYS.has(menuActive)) {
       setActiveMenu("start");
-      prevElementPanelKeyRef.current = null;
-    } else if (!elementActive) {
-      // 如果没有选中元素，清除 elementPanel（但不强制切换，除非是刚取消选中）
-      setElementPanel(null);
-      prevElementPanelKeyRef.current = null;
     }
-  }, [elementActive, pageActive, setActiveMenu, getElementInfo]);
+  }, [menuActive, setActiveMenu]);
 
-  const otherPanelClick = useMemoizedFn(() => {
-    setActiveMenu(elementPanel?.key || "");
-  });
-
-  // 使用 Zustand hook 订阅状态变化，确保组件能够响应状态更新
   const name = usePPTStore((state) => state.name);
   const setName = usePPTStore((state) => state.setName);
   const getName = usePPTStore((state) => state.getName);
@@ -359,11 +258,12 @@ export const Header: FC = () => {
     }
   });
 
-  // 导出 PPTX（PptxGenJS）
+  // 导出 PPTX：html-slide → @webppt/html-to-pptx
   const handleExportPptx = useMemoizedFn(async () => {
     if (pptxLoading) return;
 
     setPptxLoading(true);
+    const loadingMessageKey = "html-to-pptx-export-progress";
     try {
       const pages = getPages().filter((page) => page.visible !== false);
       if (pages.length === 0) {
@@ -371,15 +271,49 @@ export const Header: FC = () => {
         return;
       }
 
-      await downloadPptxFromApi({
+      let downloadHtmlToPptx: typeof import("@/services/exportHtmlToPptx").downloadHtmlToPptx;
+      try {
+        ({ downloadHtmlToPptx } = await import("@/services/exportHtmlToPptx"));
+      } catch (loadErr) {
+        // HMR / 首次编译竞态：重试一次；仍失败提示硬刷新
+        console.warn("exportHtmlToPptx chunk load retry", loadErr);
+        ({ downloadHtmlToPptx } = await import("@/services/exportHtmlToPptx"));
+      }
+      const result = await downloadHtmlToPptx({
         name: getName(),
         pages,
+        onProgress: ({ current, total }) => {
+          message.loading({
+            key: loadingMessageKey,
+            duration: 0,
+            content: t("header.domToPptxExportProgress", { current, total }),
+          });
+        },
       });
-      message.success(t("header.pptxSuccess"));
+      message.destroy(loadingMessageKey);
+      message.success(t("header.domToPptxSuccess"));
+      if (result.skippedLegacyCount > 0) {
+        message.info(
+          t("header.domToPptxSkippedLegacy", {
+            count: result.skippedLegacyCount,
+          }),
+        );
+      }
     } catch (error) {
-      console.error("导出PPTX失败:", error);
-      message.error(t("header.pptxFailed"));
+      message.destroy(loadingMessageKey);
+      console.error("PPTX 导出失败:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      const isChunk =
+        /Loading chunk|ChunkLoadError|Failed to fetch dynamically imported/i.test(
+          msg,
+        );
+      message.error(
+        isChunk
+          ? "导出模块加载失败（开发态分包未就绪）。请硬刷新页面后重试。"
+          : msg || t("header.domToPptxFailed"),
+      );
     } finally {
+      message.destroy(loadingMessageKey);
       setTimeout(() => {
         setPptxLoading(false);
       }, 200);
@@ -539,6 +473,15 @@ export const Header: FC = () => {
             style={{ display: "none" }}
             onChange={handleImportConfigChange}
           />
+          <Tooltip placement="bottomLeft" title="PPT 模板">
+            <Button
+              size="small"
+              type="text"
+              href="/templates"
+            >
+              模板
+            </Button>
+          </Tooltip>
           <Tooltip placement="bottomLeft" title={t("header.importConfig")}>
             <Button
               size="small"
@@ -599,7 +542,7 @@ export const Header: FC = () => {
               onClick={handleExportLongImage}
             />
           </Tooltip>
-          <Tooltip placement="bottom" title={t("header.exportPptx")}>
+          <Tooltip placement="bottom" title={t("header.exportDomToPptx")}>
             <Button
               size="small"
               type="text"
@@ -607,7 +550,7 @@ export const Header: FC = () => {
                 pptxLoading ? (
                   <LoadingOutlined spin style={{ color: "#f25f00" }} />
                 ) : (
-                  <FilePpt theme="outline" size="16" fill="currentColor" />
+                  <FilePpt theme="filled" size="16" fill="currentColor" />
                 )
               }
               disabled={pptxLoading}
@@ -632,30 +575,6 @@ export const Header: FC = () => {
               {item.label}
             </div>
           ))}
-          {elementActive && (
-            <div
-              className={`${styles.navItem} text-[13px] cursor-pointer transition-colors duration-200 ease-in-out ${
-                menuActive === "animation"
-                  ? `text-[var(--primary-color)] ${styles.activeItem}`
-                  : "text-chrome-secondary hover:text-[var(--primary-color)]"
-              }`}
-              onClick={() => setActiveMenu("animation")}
-            >
-              {t("menu.animation")}
-            </div>
-          )}
-          {elementPanel && (
-            <div
-              className={`${styles.navItem} text-[13px] cursor-pointer transition-colors duration-200 ease-in-out ${
-                menuActive === elementPanel.key
-                  ? `text-[var(--primary-color)] ${styles.activeItem}`
-                  : "text-chrome-secondary hover:text-[var(--primary-color)]"
-              }`}
-              onClick={otherPanelClick}
-            >
-              {t(elementPanel.title)}
-            </div>
-          )}
         </div>
         <div className="flex justify-end shrink-0 items-center gap-[4px]">
           <ThemeSwitcher />

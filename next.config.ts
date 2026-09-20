@@ -53,12 +53,15 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
   experimental: {
     reactCompiler: true,
-    // 导出 PPT 可能携带 base64 图片快照，放宽请求体限制
-    serverActions: {
-      bodySizeLimit: "50mb",
-    },
   },
-  serverExternalPackages: ["pptxgenjs"],
+  serverExternalPackages: [
+    "qiniu",
+    "sharp",
+    "archiver",
+    "html-minifier-terser",
+    "csso",
+    "puppeteer",
+  ],
   eslint: {
     // Keep build unblocked; run `npm run lint` separately
     ignoreDuringBuilds: true,
@@ -71,15 +74,16 @@ const nextConfig: NextConfig = {
     "antd",
     "@ant-design/icons",
     "@ant-design/v5-patch-for-react-19",
+    "@webppt/html-to-pptx",
   ],
   webpack: (config, { isServer, webpack }) => {
     // Package main points at src/ (imports .less); use prebuilt dist instead
     config.resolve = config.resolve ?? {};
     config.resolve.alias = {
       ...config.resolve.alias,
-      "x-data-spreadsheet$": path.resolve(
+      "@webppt/html-to-pptx": path.resolve(
         __dirname,
-        "node_modules/x-data-spreadsheet/dist/xspreadsheet.js"
+        "packages/html-to-pptx/src/index.ts",
       ),
     };
 

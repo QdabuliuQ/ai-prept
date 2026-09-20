@@ -13,7 +13,7 @@ export const Menu: FC = () => {
   // 使用 Zustand hook 订阅状态变化，确保组件能够响应状态更新
   const menuActive = useMenuActiveStore((state) => state.menuActive);
   const activePanelKey = menuActive as keyof typeof Panel;
-  const ActivePanelComponent = Panel[activePanelKey];
+  const ActivePanelComponent = Panel[activePanelKey] ?? Panel.start;
 
   const wrapperRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);

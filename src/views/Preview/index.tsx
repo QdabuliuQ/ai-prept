@@ -4,7 +4,6 @@ import {
 } from "@/constants/canvas";
 import {
   useContextMenuStore,
-  useElementActiveStore,
   useFullscreenStore,
   useMenuActiveStore,
   usePageActiveStore,
@@ -14,9 +13,6 @@ import type { Page } from "@/store/ppt";
 import { initPPTStore } from "@/utils/initStore";
 import {
   addPageAndActivate,
-  copyActiveElement,
-  cutActiveElement,
-  deleteActiveElement,
   deletePageAndFallback,
   duplicatePageAndActivate,
   resetPageElements,
@@ -181,9 +177,6 @@ const PreviewComponent: FC = () => {
   const pages = usePPTStore((state) => state.pages);
   const pageActive = usePageActiveStore((state) => state.pageActive);
   const setPageActive = usePageActiveStore((state) => state.setPageActive);
-  const resetElementActive = useElementActiveStore(
-    (state) => state.resetElementActive
-  );
   const setActiveMenu = useMenuActiveStore((state) => state.setActiveMenu);
   const hideMenu = useContextMenuStore((state) => state.hideMenu);
   const enterFullscreen = useFullscreenStore((state) => state.enterFullscreen);
@@ -273,7 +266,6 @@ const PreviewComponent: FC = () => {
 
   const handlePageClick = useMemoizedFn((pageId: string) => {
     setPageActive(pageId);
-    resetElementActive();
     setActiveMenu("start");
     hideMenu();
   });
@@ -361,27 +353,6 @@ const PreviewComponent: FC = () => {
       e.preventDefault();
       handleDeletePage();
     }
-  });
-
-  useKeyPress(["shift.c"], (e) => {
-    const target = e.target as HTMLElement;
-    if (isInputElement(target)) return;
-    e.preventDefault();
-    copyActiveElement();
-  });
-
-  useKeyPress(["shift.x"], (e) => {
-    const target = e.target as HTMLElement;
-    if (isInputElement(target)) return;
-    e.preventDefault();
-    cutActiveElement();
-  });
-
-  useKeyPress(["shift.d"], (e) => {
-    const target = e.target as HTMLElement;
-    if (isInputElement(target)) return;
-    e.preventDefault();
-    deleteActiveElement();
   });
 
   useKeyPress(["ctrl.h"], (e) => {

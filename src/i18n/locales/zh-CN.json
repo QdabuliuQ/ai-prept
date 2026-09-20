@@ -71,12 +71,14 @@
     "exportConfig": "导出配置文件",
     "exportPdf": "导出PDF",
     "exportImage": "导出长图",
-    "exportPptx": "导出PPTX",
+    "exportDomToPptx": "导出PPTX",
     "untitled": "未命名",
     "longImageSuffix": "长图",
     "noExportPages": "没有可导出的页面",
-    "pptxSuccess": "PPTX 导出成功",
-    "pptxFailed": "导出 PPTX 失败",
+    "domToPptxExportProgress": "正在导出 PPTX：已导出 {{current}} / 共 {{total}} 页",
+    "domToPptxSuccess": "PPTX 导出成功",
+    "domToPptxFailed": "PPTX 导出失败",
+    "domToPptxSkippedLegacy": "已跳过 {{count}} 页非 HTML 页面",
     "palette": "配色",
     "paletteHint": "选择预设主题色，将更新文字、图标、形状与图表颜色"
   },
@@ -157,7 +159,7 @@
     "view": "视图",
     "play": "放映",
     "animation": "动画",
-    "start": "开始",
+    "start": "页面",
     "toggle": "切换"
   },
   "element": {

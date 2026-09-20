@@ -71,12 +71,14 @@
     "exportConfig": "Export Config",
     "exportPdf": "Export PDF",
     "exportImage": "Export Image",
-    "exportPptx": "Export PPTX",
+    "exportDomToPptx": "Export PPTX",
     "untitled": "Untitled",
     "longImageSuffix": "long-image",
     "noExportPages": "No pages to export",
-    "pptxSuccess": "PPTX exported successfully",
-    "pptxFailed": "Failed to export PPTX",
+    "domToPptxExportProgress": "Exporting PPTX: {{current}} / {{total}} slides exported",
+    "domToPptxSuccess": "PPTX exported successfully",
+    "domToPptxFailed": "Failed to export PPTX",
+    "domToPptxSkippedLegacy": "Skipped {{count}} non-HTML page(s)",
     "palette": "Colors",
     "paletteHint": "Pick a preset palette to restyle text, icons, shapes, and charts"
   },
@@ -157,8 +159,8 @@
     "view": "View",
     "play": "Play",
     "animation": "Animation",
-    "start": "Start",
-    "toggle": "Toggle"
+    "start": "Pages",
+    "toggle": "Transitions"
   },
   "element": {
     "text": "Text",

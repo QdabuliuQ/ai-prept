@@ -1,134 +1,152 @@
-import { CANVAS_ASPECT_RATIO_CSS, CANVAS_HEIGHT, CANVAS_WIDTH } from "@/constants/canvas";
+import { CANVAS_ASPECT_RATIO_CSS } from "@/constants/canvas";
 import {
   useDisplayStatusStore,
-  useElementActiveStore,
   useMenuActiveStore,
   usePageActiveStore,
   usePPTStore,
 } from "@/store";
 import type { Page } from "@/store/ppt";
 import { showPageContextMenu } from "@/utils/pageContextMenu";
+import {
+  scheduleVisibleThumbnails,
+  usePageThumbnail,
+  usePageThumbnailLoading,
+} from "@/utils/pageThumbnail";
 import { PreviewCloseOne } from "@icon-park/react";
-import { useDebounceFn, useMemoizedFn } from "ahooks";
-import { type FC, useEffect, useRef, useState } from "react";
-import { Canvas } from "../Canvas";
+import { useMemoizedFn } from "ahooks";
+import { Spin } from "antd";
+import {
+  memo,
+  type FC,
+  useEffect,
+  useRef,
+} from "react";
+
+const GridThumbCard: FC<{
+  page: Page;
+  index: number;
+  active: boolean;
+  onClick: (pageId: string) => void;
+  onContextMenu: (e: React.MouseEvent, pageId: string) => void;
+}> = memo(({ page, index, active, onClick, onContextMenu }) => {
+  const thumbnailUrl = usePageThumbnail(page);
+  const isLoading = usePageThumbnailLoading(page);
+
+  return (
+    <div className="flex flex-col items-center cursor-pointer group">
+      <div
+        className={`grid-card relative w-full bg-chrome-thumb rounded-[6px] overflow-hidden transition-shadow ${
+          active
+            ? "shadow-[0_0_0_2px_var(--primary-color)]"
+            : "shadow-[0_0_0_1px_var(--thumb-border)] group-hover:shadow-[0_0_0_1px_var(--thumb-border-hover)]"
+        }`}
+        style={{ aspectRatio: CANVAS_ASPECT_RATIO_CSS }}
+        onClick={() => onClick(page.id)}
+        onContextMenu={(e) => onContextMenu(e, page.id)}
+      >
+        {thumbnailUrl ? (
+          <img
+            src={thumbnailUrl}
+            alt={`幻灯片 ${index + 1}`}
+            className="absolute inset-0 w-full h-full object-fill pointer-events-none"
+            draggable={false}
+          />
+        ) : (
+          <div className="absolute inset-0 bg-[linear-gradient(90deg,var(--skeleton-from)_25%,var(--skeleton-mid)_37%,var(--skeleton-from)_63%)] bg-[length:400%_100%] animate-pulse" />
+        )}
+        {!thumbnailUrl && isLoading && (
+          <div className="absolute inset-0 z-[2] flex items-center justify-center bg-black/5">
+            <Spin size="small" />
+          </div>
+        )}
+        {page.visible === false && (
+          <div className="absolute inset-0 flex items-center justify-center bg-black/10 z-[3]">
+            <PreviewCloseOne
+              theme="outline"
+              size="24"
+              fill="var(--icon-color)"
+            />
+          </div>
+        )}
+      </div>
+      <span
+        className={`mt-[8px] text-[13px] ${
+          active ? "text-primary font-semibold" : "text-chrome-muted"
+        }`}
+      >
+        幻灯片 {index + 1}
+      </span>
+    </div>
+  );
+});
+GridThumbCard.displayName = "GridThumbCard";
 
 const GridComponent: FC = () => {
-  // 使用 Zustand hooks 订阅状态变化，确保组件能够响应状态更新
   const pages = usePPTStore((state) => state.pages);
   const pageActive = usePageActiveStore((state) => state.pageActive);
   const setPageActive = usePageActiveStore((state) => state.setPageActive);
-  const resetElementActive = useElementActiveStore(
-    (state) => state.resetElementActive
-  );
   const setDisplayStatus = useDisplayStatusStore(
     (state) => state.setDisplayStatus
   );
   const setActiveMenu = useMenuActiveStore((state) => state.setActiveMenu);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [scale, setScale] = useState(0.2);
 
-  // 计算缩放比例
-  const calculateScale = () => {
-    if (!containerRef.current) return;
-
-    // 获取第一个卡片的宽度作为参考
-    const firstCard = containerRef.current.querySelector(
-      ".grid-card"
-    ) as HTMLElement;
-
-    if (firstCard) {
-      const cardWidth = firstCard.offsetWidth;
-      const newScale = cardWidth / CANVAS_WIDTH;
-      setScale(newScale);
-    }
-  };
-
-  // 防抖处理的 resize 事件
-  const { run: debouncedCalculateScale } = useDebounceFn(calculateScale, {
-    wait: 300,
-  });
-
-  // 处理右键菜单
   const handleContextMenu = useMemoizedFn(
     (e: React.MouseEvent, pageId: string) => {
       showPageContextMenu({ pageId, event: e });
     }
   );
 
-  // 处理单击切换到编辑模式
   const handleClick = useMemoizedFn((pageId: string) => {
-    // 切换到点击的页面
     setPageActive(pageId);
-    // 清空选中的元素
-    resetElementActive();
-    // 切换到 default 模式
     setDisplayStatus("default");
-    // 设置 menuActive 为默认值 start
     setActiveMenu("start");
   });
 
+  // 进入网格预览：优先为当前可见页生成静态缩略图（串行离屏 iframe，避免 N 路同时加载）
   useEffect(() => {
-    // 延迟计算，确保 DOM 已渲染
-    const timer = setTimeout(calculateScale, 100);
+    if (pages.length === 0) return;
+    scheduleVisibleThumbnails(pages.slice(0, 12), { immediate: true });
 
-    // 监听窗口大小变化（使用防抖）
-    window.addEventListener("resize", debouncedCalculateScale);
+    const root = containerRef.current;
+    if (!root || typeof IntersectionObserver === "undefined") return;
 
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener("resize", debouncedCalculateScale);
-    };
-  }, [pages.length, debouncedCalculateScale]);
+    const cardByEl = new Map<Element, Page>();
+    const cards = root.querySelectorAll(".grid-card");
+    pages.forEach((page, i) => {
+      const el = cards[i];
+      if (el) cardByEl.set(el, page);
+    });
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .map((e) => cardByEl.get(e.target))
+          .filter(Boolean) as Page[];
+        if (visible.length > 0) {
+          scheduleVisibleThumbnails(visible, { immediate: true });
+        }
+      },
+      { root, rootMargin: "120px", threshold: 0.01 }
+    );
+
+    cards.forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [pages]);
 
   return (
     <div ref={containerRef} className="flex-1 min-h-0 overflow-auto p-[20px]">
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-[20px]">
         {pages.map((page: Page, index: number) => (
-          <div
+          <GridThumbCard
             key={page.id}
-            className="flex flex-col items-center cursor-pointer group"
-          >
-            <div
-              className={`grid-card relative w-full bg-chrome-thumb rounded-[6px] overflow-hidden transition-shadow ${
-                pageActive === page.id
-                  ? "shadow-[0_0_0_2px_var(--primary-color)]"
-                  : "shadow-[0_0_0_1px_var(--thumb-border)] group-hover:shadow-[0_0_0_1px_var(--thumb-border-hover)]"
-              }`}
-              style={{ aspectRatio: CANVAS_ASPECT_RATIO_CSS }}
-              onClick={() => handleClick(page.id)}
-              onContextMenu={(e) => handleContextMenu(e, page.id)}
-            >
-              <div
-                className="absolute top-0 left-0 origin-top-left"
-                style={{
-                  width: `${CANVAS_WIDTH}px`,
-                  height: `${CANVAS_HEIGHT}px`,
-                  transform: `scale(${scale})`,
-                }}
-              >
-                <Canvas mode="preview" page={page} />
-              </div>
-              {page.visible === false && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/10">
-                  <PreviewCloseOne
-                    theme="outline"
-                    size="24"
-                    fill="var(--icon-color)"
-                  />
-                </div>
-              )}
-            </div>
-            <span
-              className={`mt-[8px] text-[13px] ${
-                pageActive === page.id
-                  ? "text-primary font-semibold"
-                  : "text-chrome-muted"
-              }`}
-            >
-              幻灯片 {index + 1}
-            </span>
-          </div>
+            page={page}
+            index={index}
+            active={pageActive === page.id}
+            onClick={handleClick}
+            onContextMenu={handleContextMenu}
+          />
         ))}
       </div>
     </div>
