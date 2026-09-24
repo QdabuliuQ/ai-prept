@@ -1,7 +1,7 @@
 ---
 name: webppt-image-director
 description: Direct and generate coherent Nano Banana imagery for WebPPT template decks. Use this skill whenever a WebPPT/PPT Master task needs AI images, image_hint/image_role/image_aspect planning, a consistent image suite, better Nano Banana quality, slide-safe composition, reference-image locking, candidate selection, or image-generation QA. Also use when generated slide images look generic, inconsistent, boxed, badly cropped, cover text has no safe space, or the user asks to improve WebPPT image quality. Do not use for SVG decorations, editable diagrams, charts, or icons that should remain native slide objects.
-compatibility: WebPPT repository; works with the installed nano-banana skill and agent/src/webppt_agent/image/generate.py conventions.
+compatibility: WebPPT repository; works with the installed nano-banana skill and backend/image/generate.py conventions.
 ---
 
 # WebPPT Image Director

@@ -2,7 +2,7 @@
 module.exports = {
   content: [
     "./agent-output/**/*.{html,css}",
-    "./agent/src/webppt_agent/templates/**/*.{py,html}",
+    "./backend/templates/**/*.{py,html}",
   ],
   // 幻灯片页自带重置；避免与 theme.css 冲突的 preflight
   corePlugins: {

@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "webppt-backend"
+version = "0.3.0"
+description = "WebPPT backend: FastAPI + PPT Master generation pipeline"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "openai>=1.40.0",
+  "python-dotenv>=1.0.0",
+  "Pillow>=10.0.0",
+  "colorspacious>=1.1.2",
+  "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+gallery = [
+  "fastapi>=0.115.0,<0.116",
+  "uvicorn>=0.32.0,<0.35",
+  "psycopg[binary]>=3.1.18,<3.3",
+  "httpx>=0.27.0,<0.29",
+  "qiniu>=7.12.0,<8",
+  "htmlmin>=0.1.12",
+  "rcssmin>=1.1.0",
+  "eval_type_backport>=0.2.0",
+]
+api = [
+  "fastapi>=0.115.0,<0.116",
+  "uvicorn>=0.32.0,<0.35",
+  "psycopg[binary]>=3.1.18,<3.3",
+  "httpx>=0.27.0,<0.29",
+  "qiniu>=7.12.0,<8",
+  "htmlmin>=0.1.12",
+  "rcssmin>=1.1.0",
+  "eval_type_backport>=0.2.0",
+]
+
+[project.scripts]
+webppt-backend = "cli:main"
+
+[tool.setuptools]
+py-modules = ["cli", "config", "llm", "pricing", "public_id", "usage"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["api*", "admin*", "gallery*", "image*", "ppt_master*", "skill*", "templates*"]
+exclude = ["tests*", "scripts*", ".venv*"]

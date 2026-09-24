@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ai Prept</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;500;600;700&display=swap"
+    />
+    <link rel="icon" type="image/png" href="/brand/ai-prept-logo.png" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("webppt-theme");
+          if (t === "dark") {
+            document.documentElement.classList.add("dark");
+            document.documentElement.dataset.theme = "dark";
+          } else {
+            document.documentElement.classList.remove("dark");
+            document.documentElement.dataset.theme = "light";
+          }
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

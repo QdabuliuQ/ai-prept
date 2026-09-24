@@ -3,7 +3,7 @@
 Source of truth live files:
 `ppt-master/skills/ppt-master/references/visual-styles/`
 
-Machine index: `_catalog.json` (rebuild with `webppt-agent styles-catalog`).
+Machine index: `_catalog.json` (rebuild with `webppt-backend styles-catalog`).
 
 **New styles:** always `visual-styles/<id>.md` (root), with `Label-zh` / `Group-zh` / `Family`.
 Do **not** add new files under `variants/` unless the user explicitly asks for a variant.

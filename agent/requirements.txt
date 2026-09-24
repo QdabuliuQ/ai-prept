@@ -1,5 +1,0 @@
-openai>=1.40.0
-python-dotenv>=1.0.0
-Pillow>=10.0.0
-colorspacious>=1.1.2
-numpy>=1.24.0

@@ -1,0 +1,381 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+}
+
+/* CSS 变量定义 */
+:root {
+  /* 与 src/fonts/stacks.ts / 测量 HTML 对齐 */
+  --webppt-font-serif: "Source Han Serif SC", "Noto Serif SC", "Songti SC",
+    "STSong", serif;
+  --webppt-font-sans: "PingFang SC", "Noto Sans SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+
+  /* 主题色 */
+  --primary-color: #f25f00;
+  --primary-hover: #ff7b33;
+  --primary-soft: #fff2e6;
+  --primary-soft-hover: #ffe8d1;
+
+  /* 编辑页 chrome */
+  --app-bg: #f4f2ef;
+  --app-mesh-base: radial-gradient(
+    140% 100% at 50% 40%,
+    #ffffff 0%,
+    #f7f5f2 42%,
+    #efece8 100%
+  );
+  --app-glass-veil: linear-gradient(
+      165deg,
+      rgba(255, 255, 255, 0.28) 0%,
+      rgba(255, 255, 255, 0.08) 45%,
+      rgba(255, 252, 248, 0.22) 100%
+    ),
+    radial-gradient(
+      90% 70% at 70% 15%,
+      rgba(255, 255, 255, 0.35) 0%,
+      transparent 55%
+    );
+  --panel-bg: rgba(255, 255, 255, 0.48);
+  --panel-bg-solid: #ffffff;
+  --panel-border: rgba(255, 255, 255, 0.65);
+  --panel-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.03), 0 8px 28px rgba(60, 50, 40, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  --canvas-pane-bg: rgba(255, 255, 255, 0.42);
+  --canvas-pane-border: rgba(255, 255, 255, 0.6);
+  --canvas-pane-shadow:
+    0 4px 20px rgba(60, 50, 40, 0.04), inset 0 1px 0 rgba(255, 255, 255, 0.75);
+
+  --text-primary: #333333;
+  --text-secondary: #595959;
+  --text-muted: #8c8c8c;
+  --text-disabled: #bbbbbb;
+  --icon-color: #333333;
+
+  --hover-bg: rgba(0, 0, 0, 0.04);
+  --divider: #e8e8e8;
+  --border-subtle: #f0f0f0;
+  --border-default: #e8e8e8;
+  --input-bg: #ffffff;
+  --thumb-bg: #ffffff;
+  --thumb-border: #e8e8e8;
+  --thumb-border-hover: #d9d9d9;
+  --skeleton-from: #f0f0f0;
+  --skeleton-mid: #e6e6e6;
+  --guide-bg: #fafafa;
+  --guide-line: #d9d9d9;
+  --guide-text: #999999;
+  --grid-line: #e5e5e5;
+  --scrollbar-track: #ffffff;
+  --scrollbar-handle: rgba(0, 0, 0, 0.3);
+  --scrollbar-handle-hover: rgba(0, 0, 0, 0.5);
+
+  /* 菜单背景色（hover 用主题色；图标 fill=var(--icon-color)） */
+  --contexify-menu-bgColor: #ffffff;
+  --contexify-separator-color: #e1e5e9;
+  --contexify-item-color: #333333;
+  --contexify-activeItem-color: #ffffff;
+  --contexify-activeItem-bgColor: var(--primary-color);
+  --contexify-rightSlot-color: #999999;
+  --contexify-activeRightSlot-color: #ffffff;
+  --contexify-arrow-color: #333333;
+  --contexify-activeArrow-color: #ffffff;
+  --contexify-menu-shadow: 1px 1px 6px 2px rgba(0, 0, 0, 0.1);
+  --contexify-itemContent-padding: 6px 12px;
+
+  /* shadcn/ui tokens — primary = brand orange #f25f00 */
+  --background: 40 20% 96%;
+  --foreground: 24 10% 20%;
+  --card: 0 0% 100%;
+  --card-foreground: 24 10% 20%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 24 10% 20%;
+  --primary: 24 100% 47%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 30 15% 94%;
+  --secondary-foreground: 24 10% 25%;
+  --muted: 30 12% 93%;
+  --muted-foreground: 25 5% 45%;
+  --accent: 30 20% 94%;
+  --accent-foreground: 24 10% 25%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 30 12% 88%;
+  --input: 30 12% 88%;
+  --ring: 24 100% 47%;
+  --radius: 0.5rem;
+
+  color-scheme: light;
+}
+
+html.dark {
+  --primary-color: #f25f00;
+  --primary-hover: #ff8a4a;
+  --primary-soft: rgba(242, 95, 0, 0.18);
+  --primary-soft-hover: rgba(242, 95, 0, 0.28);
+
+  --app-bg: #141312;
+  --app-mesh-base: radial-gradient(
+    140% 100% at 50% 40%,
+    #1c1b19 0%,
+    #161514 42%,
+    #121110 100%
+  );
+  --app-glass-veil: linear-gradient(
+      165deg,
+      rgba(255, 255, 255, 0.04) 0%,
+      rgba(255, 255, 255, 0.015) 45%,
+      rgba(255, 248, 240, 0.03) 100%
+    ),
+    radial-gradient(
+      90% 70% at 70% 15%,
+      rgba(255, 200, 150, 0.06) 0%,
+      transparent 55%
+    );
+  --panel-bg: rgba(36, 34, 32, 0.72);
+  --panel-bg-solid: #2a2826;
+  --panel-border: rgba(255, 255, 255, 0.08);
+  --panel-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.25), 0 8px 28px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --canvas-pane-bg: rgba(28, 27, 25, 0.65);
+  --canvas-pane-border: rgba(255, 255, 255, 0.07);
+  --canvas-pane-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  --text-primary: #e8e6e3;
+  --text-secondary: #b0aca6;
+  --text-muted: #8a8580;
+  --text-disabled: #6a6560;
+  --icon-color: #c8c4be;
+
+  --hover-bg: rgba(255, 255, 255, 0.06);
+  --divider: rgba(255, 255, 255, 0.1);
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --input-bg: #2a2826;
+  --thumb-bg: #1e1d1b;
+  --thumb-border: rgba(255, 255, 255, 0.12);
+  --thumb-border-hover: rgba(255, 255, 255, 0.2);
+  --skeleton-from: #2a2826;
+  --skeleton-mid: #353330;
+  --guide-bg: #1e1d1b;
+  --guide-line: #3a3835;
+  --guide-text: #7a7670;
+  --grid-line: #2e2c2a;
+  --scrollbar-track: #2a2826;
+  --scrollbar-handle: rgba(255, 255, 255, 0.25);
+  --scrollbar-handle-hover: rgba(255, 255, 255, 0.4);
+
+  --contexify-menu-bgColor: #2a2826;
+  --contexify-separator-color: rgba(255, 255, 255, 0.1);
+  --contexify-item-color: #e8e6e3;
+  --contexify-activeItem-color: #ffffff;
+  --contexify-activeItem-bgColor: var(--primary-color);
+  --contexify-rightSlot-color: #8a8580;
+  --contexify-activeRightSlot-color: #ffffff;
+  --contexify-arrow-color: #c8c4be;
+  --contexify-activeArrow-color: #ffffff;
+  --contexify-menu-shadow: 1px 1px 12px 2px rgba(0, 0, 0, 0.45);
+
+  /* shadcn/ui tokens (dark) */
+  --background: 30 8% 8%;
+  --foreground: 30 10% 92%;
+  --card: 30 8% 12%;
+  --card-foreground: 30 10% 92%;
+  --popover: 30 8% 12%;
+  --popover-foreground: 30 10% 92%;
+  --primary: 24 100% 47%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 30 8% 16%;
+  --secondary-foreground: 30 10% 90%;
+  --muted: 30 8% 16%;
+  --muted-foreground: 30 6% 55%;
+  --accent: 30 8% 18%;
+  --accent-foreground: 30 10% 90%;
+  --destructive: 0 62% 45%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 30 8% 20%;
+  --input: 30 8% 20%;
+  --ring: 24 100% 47%;
+  --radius: 0.5rem;
+
+  color-scheme: dark;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(
+    --webppt-font-sans,
+    "PingFang SC",
+    "Noto Sans SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif
+  );
+  background-color: var(--app-bg);
+  color: var(--text-primary);
+}
+
+/* 全局元素选中样式 */
+.element-selected {
+  outline: 2px solid var(--primary-color, #f25f00) !important;
+}
+
+/* ContextMenu：盖过 ReactContexify.css :root 默认蓝，统一主题色 hover */
+.contexify {
+  --contexify-activeItem-color: #ffffff;
+  --contexify-activeItem-bgColor: var(--primary-color);
+  --contexify-activeRightSlot-color: #ffffff;
+  --contexify-activeArrow-color: #ffffff;
+}
+
+.contexify_itemContent {
+  font-size: 12px;
+}
+
+/* IconPark fill="var(--icon-color)"：hover/focus/子菜单打开时图标变白 */
+.contexify_item:not(.contexify_item-disabled):hover > .contexify_itemContent,
+.contexify_item:not(.contexify_item-disabled):focus > .contexify_itemContent,
+.contexify_submenu-isOpen > .contexify_itemContent {
+  --icon-color: #ffffff;
+}
+
+/* 动画/纹理等 PanelItemSelect 下拉面板：保证不透明实底 */
+.item-select-popover .ant-popover-inner {
+  background: var(--panel-bg-solid) !important;
+  padding: 8px;
+  border-radius: 8px;
+  box-shadow: var(--panel-shadow);
+}
+
+/* 暗黑模式：面板下 Popover 正文字色 */
+html.dark .ant-popover .ant-popover-inner {
+  color: var(--text-primary);
+}
+
+/* 编辑弹窗（图表/表格数据）实底，避免玻璃主题透出画布 */
+.ant-modal-content {
+  background: var(--panel-bg-solid) !important;
+}
+
+/* 管理后台 / 公开模板库弹窗：不受编辑器暗色 --panel-bg-solid 影响 */
+.admin-flat-modal .ant-modal-content {
+  background: #ffffff !important;
+  color: rgba(0, 0, 0, 0.88);
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.admin-flat-modal .ant-modal-header {
+  margin: 0 !important;
+  padding: 16px 24px !important;
+  background: #ffffff !important;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.admin-flat-modal .ant-modal-title,
+.admin-flat-modal .ant-modal-confirm-title {
+  line-height: 1.4;
+  overflow: visible;
+  color: rgba(0, 0, 0, 0.88) !important;
+}
+
+.admin-flat-modal .ant-modal-close {
+  top: 16px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
+.admin-flat-modal .ant-modal-close:hover {
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.admin-flat-modal .ant-modal-body {
+  padding: 16px 24px 24px !important;
+  color: rgba(0, 0, 0, 0.88);
+  background: #ffffff !important;
+}
+
+.admin-flat-modal .ant-modal-confirm-body {
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.admin-flat-modal .ant-modal-confirm-content,
+.admin-flat-modal .ant-modal-confirm-paragraph {
+  color: rgba(0, 0, 0, 0.65) !important;
+}
+
+.admin-flat-modal .ant-modal-confirm-btns {
+  margin-top: 20px;
+}
+
+.admin-flat-modal .ant-modal-footer {
+  background: #ffffff !important;
+  border-top: 1px solid #f0f0f0;
+}
+
+/* confirm：rootClassName 在外层，className 在 .ant-modal 上 */
+.admin-flat-modal.ant-modal-confirm .ant-modal-content,
+.ant-modal-confirm.admin-flat-modal .ant-modal-content,
+.admin-flat-modal .ant-modal-confirm .ant-modal-content {
+  padding: 24px !important;
+}
+
+.admin-flat-modal.ant-modal-confirm .ant-modal-body,
+.ant-modal-confirm.admin-flat-modal .ant-modal-body,
+.admin-flat-modal .ant-modal-confirm .ant-modal-body {
+  padding: 0 !important;
+}
+
+.admin-flat-modal .ant-typography,
+.admin-flat-modal .ant-typography code {
+  color: inherit;
+}
+
+.admin-flat-modal .ant-typography.ant-typography-secondary {
+  color: rgba(0, 0, 0, 0.45) !important;
+}
+
+.admin-template-row-focus > td {
+  background: rgba(22, 119, 255, 0.06) !important;
+}
+
+.scena-guides-guide {
+  background: var(--primary-color) !important;
+}
+
+/* 避免 canvas 默认行内布局产生基线空隙，导致标尺与父容器出现间距 */
+#ruler-container .scena-guides-manager canvas {
+  display: block;
+  margin: 0;
+  padding: 0;
+  vertical-align: top;
+}
+
+/* Gallery「发现灵感」：旋转彩虹边框 */
+@keyframes inspire-border-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.inspire-border-spin {
+  animation: inspire-border-spin 3.2s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inspire-border-spin {
+    animation: none;
+  }
+}

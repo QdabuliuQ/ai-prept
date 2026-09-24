@@ -1,0 +1,27 @@
+# Local Postgres for WebPPT gallery / admin catalog.
+# Usage:
+#   open -a Docker   # if daemon not running
+#   docker compose up -d
+#   cd backend && .venv/bin/webppt-backend gallery-sync
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: webppt-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: webppt
+      POSTGRES_PASSWORD: webppt
+      POSTGRES_DB: webppt
+    volumes:
+      - webppt_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U webppt -d webppt"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  webppt_pgdata:

@@ -1,19 +1,20 @@
 # Dependencies
 node_modules
 
-# Next.js
-.next/
-out/
-next-env.d.ts
+# Frontend build
+frontend/dist/
+*.tsbuildinfo
 
-# Agent output (TS packs pipeline)
+# Template / job output
 agent-output/
 .agent-output/
+# PPT Master intermediate PPTX (auto-created; not for manual drop-in)
+drafts/
 
-# Python agent
-agent/.venv/
-agent/output/
-agent/**/__pycache__/
+# Python backend
+backend/.venv/
+backend/output/
+backend/**/__pycache__/
 *.egg-info/
 .eggs/
 
@@ -24,7 +25,6 @@ ppt-master/
 dist
 *.log
 .DS_Store
-*.tsbuildinfo
 
 # Env
 .env

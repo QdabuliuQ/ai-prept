@@ -166,13 +166,13 @@ Fail any item → revise; do not ship.
 3. **Rebuild machine catalog** (required for Admin / CLI):
 
 ```bash
-cd agent && .venv/bin/python scripts/build-visual-style-catalog.py
-# or: webppt-agent styles-catalog --list
+cd backend && .venv/bin/python scripts/build-visual-style-catalog.py
+# or: webppt-backend styles-catalog --list
 ```
 
 4. Optionally sync Admin offline fallback `src/constants/pptMasterStyles.ts`
    (live Admin reads `_catalog.json` via `/api/admin/styles`)
-5. Smoke: `webppt-agent ppt-master --style <id> --pages 3 --mock -- "冒烟"`
+5. Smoke: `webppt-backend ppt-master --style <id> --pages 3 --mock -- "冒烟"`
 
 ## Progressive disclosure
 

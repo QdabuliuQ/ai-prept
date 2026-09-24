@@ -6,16 +6,18 @@ import tseslint from "typescript-eslint";
 export default tseslint.config([
   {
     ignores: [
-      ".next/**",
       "node_modules/**",
-      "out/**",
-      "next-env.d.ts",
-      // Third-party / generated / vendored (not app source)
+      "frontend/dist/**",
+      "frontend/postcss.config.js",
+      "frontend/tailwind.config.js",
       "ppt-master/**",
-      "agent/.venv/**",
-      "public/slide-editor/**",
-      "public/slide-vendor/**",
+      "backend/**",
+      "agent-output/**",
+      ".agent-output/**",
+      "frontend/public/slide-editor/**",
+      "frontend/public/slide-vendor/**",
       "scripts/build-slide-editor.js",
+      "scripts/slide-vendor.tailwind.config.js",
     ],
   },
   {

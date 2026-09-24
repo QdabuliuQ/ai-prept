@@ -12,12 +12,11 @@
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
     "isolatedModules": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
+      "@/*": ["./frontend/src/*"],
       "@webppt/html-to-pptx": ["./packages/html-to-pptx/src/index.ts"],
       "@webppt/html-to-pptx/*": ["./packages/html-to-pptx/src/*"]
     },
@@ -26,14 +25,9 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": [
-    "next-env.d.ts",
-    "app/**/*.ts",
-    "app/**/*.tsx",
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    "src/**/*.d.ts",
-    "packages/html-to-pptx/src/**/*.ts",
-    ".next/types/**/*.ts"
+    "frontend/**/*.ts",
+    "frontend/**/*.tsx",
+    "packages/html-to-pptx/src/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "frontend/dist", "backend"]
 }
