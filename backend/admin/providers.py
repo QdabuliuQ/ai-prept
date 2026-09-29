@@ -39,9 +39,25 @@ LLM_PROVIDERS: list[dict[str, Any]] = [
         "baseUrl": "https://api.cloudflare.com/client/v4/accounts",
         "models": [
             {
+                "id": "@cf/qwen/qwen3.8-27b",
+                "label": "Qwen3.8-27B",
+            },
+            {
+                "id": "@cf/zai-org/glm-4.7-flash",
+                "label": "GLM-4.7-Flash（免费档可用）",
+            },
+            {
                 "id": "@cf/qwen/qwen2.5-coder-32b-instruct",
-                "label": "qwen2.5-coder-32b",
-            }
+                "label": "qwen2.5-coder-32b（免费档可用）",
+            },
+            {
+                "id": "@cf/google/gemma-4-26b-a4b-it",
+                "label": "Gemma 4 26B（免费档可用）",
+            },
+            {
+                "id": "@cf/moonshotai/kimi-k2.7-code",
+                "label": "Kimi K2.7 Code（需 Workers Paid）",
+            },
         ],
         "keyEnvNames": [
             "CLOUDFLARE_API_TOKENS",
@@ -128,6 +144,44 @@ LLM_PROVIDERS: list[dict[str, Any]] = [
             "GOOGLE_API_KEY",
             "GOOGLE_AI_API_KEYS",
             "GOOGLE_AI_API_KEY",
+        ],
+    },
+    {
+        "id": "groq",
+        "label": "Groq",
+        "tier": "heavy",
+        # OpenAI 兼容：https://console.groq.com/docs/openai
+        "baseUrl": "https://api.groq.com/openai/v1",
+        "models": [
+            {
+                "id": "qwen/qwen3.8-27b",
+                "label": "Qwen3.8-27B",
+            },
+            {
+                "id": "llama-3.3-70b-versatile",
+                "label": "Llama 3.3 70B",
+            },
+        ],
+        "keyEnvNames": [
+            "GROQ_API_KEYS",
+            "GROQ_API_KEY",
+        ],
+    },
+    {
+        "id": "freeshare",
+        "label": "FreeShare",
+        "tier": "heavy",
+        # OpenAI 兼容：https://freeshare.cc.cd/v1/chat/completions
+        "baseUrl": "https://freeshare.cc.cd/v1",
+        "models": [
+            {
+                "id": "agnes-3.0-flash",
+                "label": "agnes-3.0-flash",
+            },
+        ],
+        "keyEnvNames": [
+            "FREESHARE_API_KEYS",
+            "FREESHARE_API_KEY",
         ],
     },
 ]
@@ -227,6 +281,10 @@ def list_llm_providers_public() -> list[dict[str, Any]]:
                 or _env("GOOGLE_AI_BASE_URL")
                 or row["baseUrl"]
             )
+        if p["id"] == "groq":
+            row["baseUrl"] = _env("GROQ_BASE_URL") or row["baseUrl"]
+        if p["id"] == "freeshare":
+            row["baseUrl"] = _env("FREESHARE_BASE_URL") or row["baseUrl"]
         row["configured"] = bool(keys)
         row["keyCount"] = len(keys)
         row["keyHint"] = _mask(keys[0]) if keys else None
@@ -274,6 +332,10 @@ def resolve_llm_selection(
             base = f"https://api.cloudflare.com/client/v4/accounts/{account}/ai/run"
     if pid == "gemini":
         base = _env("GEMINI_BASE_URL") or _env("GOOGLE_AI_BASE_URL") or base
+    if pid == "groq":
+        base = _env("GROQ_BASE_URL") or base
+    if pid == "freeshare":
+        base = _env("FREESHARE_BASE_URL") or base
     return {
         "provider": found["id"],
         "model": mid,
@@ -332,7 +394,82 @@ def llm_env_for_dual(selection: dict[str, Any]) -> dict[str, str]:
         env["GEMINI_API_KEYS"] = ",".join(keys)
         env["GOOGLE_API_KEY"] = keys[0]
         env["GOOGLE_AI_API_KEY"] = keys[0]
+    if selection["provider"] == "groq":
+        env["GROQ_API_KEY"] = keys[0]
+        env["GROQ_API_KEYS"] = ",".join(keys)
+    if selection["provider"] == "freeshare":
+        env["FREESHARE_API_KEY"] = keys[0]
+        env["FREESHARE_API_KEYS"] = ",".join(keys)
     return env
+
+
+def list_gallery_model_catalog() -> dict[str, Any]:
+    """首页公开模型目录（不含 key 指纹）。"""
+    llm_out: list[dict[str, Any]] = []
+    for p in list_llm_providers_public():
+        llm_out.append(
+            {
+                "id": p["id"],
+                "label": p["label"],
+                "tier": p.get("tier"),
+                "models": list(p.get("models") or []),
+                "configured": bool(p.get("configured")),
+            }
+        )
+    image_out: list[dict[str, Any]] = []
+    for p in list_image_providers_public():
+        image_out.append(
+            {
+                "id": p["id"],
+                "label": p["label"],
+                "models": list(p.get("models") or []),
+                "configured": bool(p.get("configured")),
+            }
+        )
+
+    def _pick_llm() -> tuple[str, str]:
+        # 优先 Groq（新接入），再 Gemini，再任意已配置
+        for prefer in ("groq", "gemini", "deepseek"):
+            hit = next((x for x in llm_out if x["id"] == prefer and x["configured"]), None)
+            if hit and hit["models"]:
+                return hit["id"], str(hit["models"][0]["id"])
+        hit = next((x for x in llm_out if x["configured"] and x["models"]), None)
+        if hit:
+            return hit["id"], str(hit["models"][0]["id"])
+        first = llm_out[0] if llm_out else None
+        if first and first["models"]:
+            return first["id"], str(first["models"][0]["id"])
+        return "gemini", "gemini-3.8-flash"
+
+    def _pick_image() -> tuple[str, str]:
+        for prefer in ("siliconflow", "openai", "pollinations"):
+            hit = next(
+                (x for x in image_out if x["id"] == prefer and x["configured"]), None
+            )
+            if hit and hit["models"]:
+                # 硅基默认 Kolors（与首页历史行为一致）
+                if hit["id"] == "siliconflow":
+                    for m in hit["models"]:
+                        if m.get("id") == "Kwai-Kolors/Kolors":
+                            return hit["id"], "Kwai-Kolors/Kolors"
+                return hit["id"], str(hit["models"][0]["id"])
+        hit = next((x for x in image_out if x["configured"] and x["models"]), None)
+        if hit:
+            return hit["id"], str(hit["models"][0]["id"])
+        return "siliconflow", "Kwai-Kolors/Kolors"
+
+    llm_p, llm_m = _pick_llm()
+    img_p, img_m = _pick_image()
+    return {
+        "llmProviders": llm_out,
+        "imageProviders": image_out,
+        "defaults": {
+            "llmProvider": llm_p,
+            "llmModel": llm_m,
+            "imageProvider": img_p,
+            "imageModel": img_m,
+        },
+    }
 
 
 def image_env_for_selection(selection: dict[str, Any]) -> dict[str, str]:

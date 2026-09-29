@@ -84,39 +84,6 @@
   }
 }
 
-.thumbSkeleton {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    90deg,
-    var(--skeleton-from) 25%,
-    var(--skeleton-mid) 37%,
-    var(--skeleton-from) 63%
-  );
-  background-size: 400% 100%;
-  animation: thumbShimmer 1.2s ease infinite;
-}
-
-.thumbLoading {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--thumb-bg) 35%, transparent);
-  backdrop-filter: blur(0.5px);
-}
-
-@keyframes thumbShimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: 0 0;
-  }
-}
-
 .floatAction {
   display: flex;
   align-items: center;

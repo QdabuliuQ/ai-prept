@@ -1,6 +1,11 @@
-import { Translate } from "@icon-park/react";
-import type { MenuProps } from "antd";
-import { Button, Dropdown } from "antd";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Languages } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 const LANGUAGE_OPTIONS = [
@@ -25,30 +30,35 @@ const LanguageSwitcher = () => {
     document.documentElement.lang = lang;
   };
 
-  const items: MenuProps["items"] = LANGUAGE_OPTIONS.map(({ key, label }) => ({
-    key,
-    label,
-    onClick: () => changeLanguage(key),
-  }));
-
   const currentLabel =
     LANGUAGE_OPTIONS.find((item) => item.key === currentLanguage)?.label ??
     "English";
 
   return (
-    <Dropdown
-      menu={{ items, selectedKeys: [currentLanguage] }}
-      placement="bottomRight"
-    >
-      <Button
-        size="small"
-        type="text"
-        icon={<Translate theme="outline" size="16" fill="currentColor" />}
-        style={{ display: "flex", alignItems: "center", gap: "4px" }}
-      >
-        {currentLabel}
-      </Button>
-    </Dropdown>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-[30px] gap-1 px-2 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--hover-bg)] hover:text-[var(--primary-color)]"
+        >
+          <Languages className="size-4" />
+          {currentLabel}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[8rem] text-[12px]">
+        {LANGUAGE_OPTIONS.map(({ key, label }) => (
+          <DropdownMenuItem
+            key={key}
+            className="text-[12px]"
+            onSelect={() => changeLanguage(key)}
+          >
+            {label}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 };
 

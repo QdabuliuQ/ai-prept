@@ -645,11 +645,15 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
   const renderSlideHtml = useMemoizedFn(() => {
     if (!currentPage) return null;
     const isEditCanvas = mode === "edit";
+    const canEdit =
+      isEditCanvas &&
+      currentPage.id !== "remix_pending" &&
+      currentPage.id !== "remix_idle";
     return (
       <HtmlSlideFrame
         page={currentPage as Page}
-        pointerEventsNone={!isEditCanvas}
-        editable={isEditCanvas}
+        pointerEventsNone={!canEdit}
+        editable={canEdit}
         title={`slide-${currentPage.id}`}
       />
     );

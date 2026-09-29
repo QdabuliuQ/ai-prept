@@ -1,20 +1,21 @@
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useMemoizedFn } from "ahooks";
-import { Button, type ButtonProps } from "antd";
 import {
   cloneElement,
   isValidElement,
   useMemo,
   type FC,
   type ReactElement,
+  type ReactNode,
 } from "react";
 
 interface IPanelLargeButtonProps {
   title: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
   onClick?: () => void;
   active?: boolean;
   disabled?: boolean;
-  type?: ButtonProps["type"];
 }
 
 export const PanelLargeButton: FC<IPanelLargeButtonProps> = ({
@@ -23,62 +24,59 @@ export const PanelLargeButton: FC<IPanelLargeButtonProps> = ({
   onClick,
   active = false,
   disabled = false,
-  type = "text",
 }) => {
   const clickHandle = useMemoizedFn(() => {
-    if (!disabled) {
-      onClick?.();
-    }
+    if (!disabled) onClick?.();
   });
 
-  const styles = useMemo(() => {
-    const baseStyles: React.CSSProperties = {
-      width: "auto",
-      minWidth: "53px",
-      height: "100%",
-      display: "flex",
-      flexDirection: "column",
-      alignItems: "center",
-      justifyContent: "center",
-      fontSize: "12px",
-      gap: "0px",
-      lineHeight: "1",
-      padding: "0 8px",
-      color: "var(--icon-color)",
-      borderRadius: "6px",
-      border: "1px solid transparent",
-      flexShrink: 0,
-    };
-
-    if (active) {
-      return {
-        ...baseStyles,
-        backgroundColor: "var(--primary-soft)",
-        color: "var(--primary-color)",
-      };
-    }
-
-    return baseStyles;
-  }, [active]);
+  const iconFill = disabled
+    ? "var(--text-disabled)"
+    : active
+      ? "var(--primary-color)"
+      : "var(--icon-color)";
 
   const renderIcon = useMemo(() => {
     if (!isValidElement(icon)) return icon;
-
     return cloneElement(icon as ReactElement<{ fill?: string }>, {
-      fill: disabled ? "var(--text-disabled)" : "currentColor",
+      fill: iconFill,
     });
-  }, [icon, disabled]);
+  }, [icon, iconFill]);
 
   return (
     <Button
-      style={styles}
-      onClick={clickHandle}
-      type={type}
+      type="button"
+      variant="ghost"
       disabled={disabled}
-      className="hover:!bg-[var(--primary-soft)] hover:!text-[var(--primary-color)]"
+      onClick={clickHandle}
+      className={cn(
+        "group h-full min-w-[53px] shrink-0 flex-col gap-0 rounded-[6px] px-2 py-0 text-[12px] leading-none hover:bg-[var(--primary-soft)]",
+        active && "bg-[var(--primary-soft)]",
+      )}
     >
-      <i className="mb-[6px] text-current leading-none">{renderIcon}</i>
-      <span className={`${disabled ? "text-chrome-disabled" : ""} text-[12px] whitespace-nowrap`}>
+      <i
+        className={cn(
+          "mb-[6px] leading-none",
+          disabled
+            ? "text-chrome-disabled"
+            : active
+              ? "text-[var(--primary-color)]"
+              : "text-[var(--icon-color)]",
+          !disabled && "group-hover:text-[var(--primary-color)]",
+        )}
+      >
+        {renderIcon}
+      </i>
+      <span
+        className={cn(
+          "whitespace-nowrap text-[12px]",
+          disabled
+            ? "text-chrome-disabled"
+            : active
+              ? "text-[var(--primary-color)]"
+              : "text-[var(--icon-color)]",
+          !disabled && "group-hover:text-[var(--primary-color)]",
+        )}
+      >
         {title}
       </span>
     </Button>

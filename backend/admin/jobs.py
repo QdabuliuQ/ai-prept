@@ -31,6 +31,42 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+_FAIL_LINE_RE = re.compile(
+    r"(?:\[(?:remix|rewrite-page|style|pack)[^\]]*\]\s+)?FAIL\s*[—\-]\s*(.+)\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_MSG_IN_QUOTES_RE = re.compile(
+    r"""['"]message['"]\s*:\s*['"]([^'"]+)['"]""",
+    re.IGNORECASE,
+)
+
+
+def _error_from_log(log: str | None, fallback: str) -> str:
+    """Prefer the last FAIL line / API message over a bare exit code."""
+    text = str(log or "")
+    if not text.strip():
+        return fallback
+    matches = list(_FAIL_LINE_RE.finditer(text))
+    raw = matches[-1].group(1).strip() if matches else ""
+    if not raw:
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            if "Error code:" in line or "UNAVAILABLE" in line or "high demand" in line.lower():
+                raw = line
+                break
+    if not raw:
+        return fallback
+    quoted = _MSG_IN_QUOTES_RE.search(raw)
+    if quoted:
+        raw = quoted.group(1).strip()
+    raw = re.sub(r"\s+", " ", raw).strip()
+    if len(raw) > 400:
+        raw = raw[:397] + "…"
+    return raw or fallback
+
+
 def _job_path(job_id: str) -> Path:
     return jobs_dir() / f"{job_id}.json"
 
@@ -216,6 +252,55 @@ def _append_log(job: dict[str, Any], text: str) -> None:
                 "percent": int(round(((ok + fail) / total) * 100)),
             }
         )
+    cloned = re.search(r"\[remix-cloned\]\s+id=(\S+)\s+total=(\d+)", text)
+    if cloned:
+        tid = cloned.group(1)
+        total = max(1, int(cloned.group(2)))
+        job["templateId"] = tid
+        ids = list(job.get("templateIds") or [])
+        if tid not in ids:
+            ids.append(tid)
+            job["templateIds"] = ids
+        job["pagesReady"] = list(job.get("pagesReady") or [])
+        job["pageTotal"] = total
+        if job.get("progress"):
+            job["progress"]["total"] = total
+            job["progress"]["lastId"] = tid
+            job["progress"]["percent"] = max(int(job["progress"].get("percent") or 0), 5)
+
+    page_m = re.search(
+        r"\[remix-page\]\s+id=(\S+)\s+file=(\S+)\s+index=(\d+)\s+done=(\d+)\s+total=(\d+)",
+        text,
+    )
+    if page_m:
+        tid = page_m.group(1)
+        file_rel = page_m.group(2)
+        index = int(page_m.group(3))
+        done = int(page_m.group(4))
+        total = max(1, int(page_m.group(5)))
+        job["templateId"] = tid
+        ids = list(job.get("templateIds") or [])
+        if tid not in ids:
+            ids.append(tid)
+            job["templateIds"] = ids
+        ready = list(job.get("pagesReady") or [])
+        entry = {"index": index, "file": file_rel}
+        if not any(isinstance(x, dict) and x.get("index") == index for x in ready):
+            ready.append(entry)
+            ready.sort(key=lambda x: int(x.get("index") or 0))
+        job["pagesReady"] = ready
+        job["pageTotal"] = total
+        if job.get("progress"):
+            job["progress"].update(
+                {
+                    "total": total,
+                    "done": min(total, done),
+                    "ok": min(total, done),
+                    "percent": int(round((done / total) * 100)),
+                    "lastId": tid,
+                }
+            )
+
     id_m = re.search(r"id=([^\s]+)", text)
     if id_m and job.get("progress"):
         job["progress"]["lastId"] = id_m.group(1)
@@ -281,7 +366,10 @@ def _spawn(job: dict[str, Any], args: list[str], extra_env: dict[str, str]) -> d
                     cur["progress"]["percent"] = 100
             else:
                 cur["status"] = "failed"
-                cur["error"] = cur.get("error") or f"exit {code}"
+                cur["error"] = _error_from_log(
+                    cur.get("log"),
+                    str(cur.get("error") or f"exit {code}"),
+                )
             # read report for template ids / browser convert flags
             report = jobs_dir() / f"{cur['id']}-report.json"
             upsert_ids: list[str] = []
@@ -666,7 +754,10 @@ def _spawn_per_pack_random(
                     cur["progress"]["percent"] = 100
             else:
                 cur["status"] = "failed"
-                cur["error"] = cur.get("error") or f"ok={ok} fail={fail}"
+                cur["error"] = _error_from_log(
+                    cur.get("log"),
+                    str(cur.get("error") or f"ok={ok} fail={fail}"),
+                )
             _append_log(cur, f"[summary] ok={ok} fail={fail}\n")
             _jobs[cur["id"]] = cur
             _persist(cur)

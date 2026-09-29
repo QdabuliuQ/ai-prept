@@ -447,11 +447,50 @@ _LOCAL_IMG_ATTR_RE = re.compile(
     re.I,
 )
 _ALT_RE = re.compile(r"""\b(?:alt|data-alt)=["']([^"']*)["']""", re.I)
+_BOX_WH_RE = re.compile(
+    r"""width\s*:\s*([\d.]+)\s*px.*?height\s*:\s*([\d.]+)\s*px"""
+    r"""|height\s*:\s*([\d.]+)\s*px.*?width\s*:\s*([\d.]+)\s*px""",
+    re.I | re.S,
+)
 
 
-def collect_local_images(html_pages: list[str]) -> dict[str, str]:
-    """filename -> best alt/prompt hint（img 与 data-element=image 容器均收录）"""
-    out: dict[str, str] = {}
+def aspect_token_from_box(width_px: float, height_px: float) -> str:
+    """Map slot box to nearest allowed aspect token."""
+    if width_px <= 0 or height_px <= 0:
+        return "16:9"
+    ratio = width_px / height_px
+    candidates = (
+        (1, 1),
+        (16, 9),
+        (9, 16),
+        (4, 3),
+        (3, 4),
+        (3, 2),
+        (2, 3),
+    )
+    best = min(candidates, key=lambda ab: abs(ratio - (ab[0] / ab[1])))
+    return f"{best[0]}:{best[1]}"
+
+
+def _infer_slot_aspect_near(html: str, img_start: int) -> str | None:
+    """Look at enclosing markup before <img> for absolute width/height px."""
+    window = html[max(0, img_start - 1200) : img_start]
+    # Prefer innermost data-slot-type=image container
+    slot_idx = window.rfind("data-slot-type")
+    chunk = window[slot_idx:] if slot_idx >= 0 else window[-600:]
+    m = _BOX_WH_RE.search(chunk)
+    if not m:
+        return None
+    if m.group(1) is not None:
+        w, h = float(m.group(1)), float(m.group(2))
+    else:
+        h, w = float(m.group(3)), float(m.group(4))
+    return aspect_token_from_box(w, h)
+
+
+def collect_local_images(html_pages: list[str]) -> dict[str, ImageRefValue]:
+    """filename -> prompt hint，尽量带上槽位 size（避免竖槽硬塞 16:9 再被拉伸）。"""
+    out: dict[str, ImageRefValue] = {}
     for html in html_pages:
         for m in _LOCAL_IMG_ATTR_RE.finditer(html):
             name = (m.group("name") or "").strip()
@@ -459,10 +498,32 @@ def collect_local_images(html_pages: list[str]) -> dict[str, str]:
                 continue
             alt_m = _ALT_RE.search(m.group("attrs") or "")
             alt = (alt_m.group(1).strip() if alt_m else "") or ""
-            if name not in out or (alt and len(alt) > len(out[name])):
-                out[name] = alt
+            size = _infer_slot_aspect_near(html, m.start())
+            prev = out.get(name)
+            prev_prompt = image_ref_prompt(prev) if prev is not None else ""
+            prev_size = (
+                image_ref_size(prev)
+                if isinstance(prev, dict)
+                else None
+            )
+            prompt = alt if (alt and len(alt) >= len(prev_prompt)) else prev_prompt
+            final_size = size or prev_size
+            if final_size:
+                out[name] = {"prompt": prompt or name, "size": final_size}
+            else:
+                out[name] = prompt or name
     return out
 
+
+def normalize_img_object_fit(html: str, *, fit: str = "cover") -> str:
+    """PPTX 转换曾写 object-fit:fill（拉伸变形）；统一为 cover 保比例裁切。"""
+    fit = (fit or "cover").strip().lower() or "cover"
+    return re.sub(
+        r"(object-fit\s*:\s*)fill\b",
+        rf"\1{fit}",
+        html,
+        flags=re.I,
+    )
 
 def extract_theme_bg(theme_css: str) -> str | None:
     """从 theme.css 提取主背景色（--bg / --color-bg / background）。"""
@@ -1211,11 +1272,13 @@ def materialize_images(
     bg_hex: str | None = None,
     theme_colors: dict[str, str] | None = None,
     concurrency: int | None = None,
+    force: bool = False,
 ) -> list[str]:
     """按 HTML/规划引用生成/补齐 images/；返回警告列表。失败只写占位，不抛异常。
 
     refs 值可为 str（提示词，比例用全局默认）或
     ``{"prompt": "...", "size": "1:1"|"16:9"|...}``（按槽位比例生图）。
+    force=True 时即使已有真实图片也会重新生成（覆写），避免先删后写造成预览 404。
     """
     warnings: list[str] = []
     if not refs:
@@ -1266,7 +1329,7 @@ def materialize_images(
     pending: list[tuple[str, ImageRefValue]] = []
     for filename, alt in refs.items():
         dest = images_dir / filename
-        if _is_real_image(dest):
+        if not force and _is_real_image(dest):
             continue
         pending.append((filename, alt))
 

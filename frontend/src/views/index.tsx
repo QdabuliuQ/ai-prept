@@ -10,7 +10,7 @@ import { Menu } from "./Menu";
 import { Preview } from "./Preview";
 import { Slideshow } from "./Slideshow";
 
-const DEFAULT_PREVIEW_WIDTH = 230;
+const DEFAULT_PREVIEW_WIDTH = 280;
 
 const meshBaseStyle: CSSProperties = {
   background: "var(--app-mesh-base)",
@@ -130,7 +130,7 @@ export default function Index() {
             >
               <div
                 ref={previewPanelRef}
-                className={`${glassPanelClass} flex-none w-[230px] min-w-[200px] max-w-[300px] h-full min-h-0 rounded-[14px]`}
+                className={`${glassPanelClass} flex-none w-[280px] min-w-[240px] max-w-[340px] h-full min-h-0 rounded-[14px]`}
               >
                 <Preview />
               </div>

@@ -1,9 +1,22 @@
+import ThemeSwitcher from "@/components/ThemeSwitcher";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
+import { useRouter } from "@/navigation";
+import { useThemeStore } from "@/store";
 import type { PPTDocumentJSON } from "@/utils/loadDocument";
 import { buildTemplateSlideEmbedSrc } from "@/utils/templateEmbed";
-import { useRouter } from "@/navigation";
+import { ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Empty, Modal, Spin, message } from "antd";
-import { LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { toast } from "sonner";
 
 type TemplateCard = {
   id: string;
@@ -42,7 +55,7 @@ function SlideFrame({
   const h = 1080 * scale;
   return (
     <div
-      className="relative overflow-hidden bg-[#e8e6e1]"
+      className="relative overflow-hidden rounded-md border border-border bg-muted"
       style={{ width: w, height: h }}
     >
       <div
@@ -63,6 +76,10 @@ function SlideFrame({
 
 export default function TemplatesPage() {
   const router = useRouter();
+  const themeMode = useThemeStore((s) => s.theme);
+  const hydrateTheme = useThemeStore((s) => s.hydrateTheme);
+  const isDark = themeMode === "dark";
+
   const [loading, setLoading] = useState(true);
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [templates, setTemplates] = useState<TemplateCard[]>([]);
@@ -74,6 +91,10 @@ export default function TemplatesPage() {
   const [pageIndex, setPageIndex] = useState(0);
 
   useEffect(() => {
+    hydrateTheme();
+  }, [hydrateTheme]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -82,7 +103,7 @@ export default function TemplatesPage() {
         const data = (await res.json()) as { templates: TemplateCard[] };
         if (!cancelled) setTemplates(data.templates || []);
       } catch {
-        if (!cancelled) message.error("无法读取模板列表");
+        if (!cancelled) toast.error("无法读取模板列表");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -107,10 +128,10 @@ export default function TemplatesPage() {
           "webppt:pending-template-doc",
           JSON.stringify(data),
         );
-        message.success("模板已加载，正在打开编辑器");
-        router.push("/editor");
+        toast.success("模板已加载，正在打开编辑器");
+        router.push("/edit");
       } catch {
-        message.error("加载模板失败");
+        toast.error("加载模板失败");
       } finally {
         setLoadingId(null);
       }
@@ -129,7 +150,7 @@ export default function TemplatesPage() {
         const doc = await fetchDoc(tpl.id);
         setViewerDoc(doc);
       } catch {
-        message.error("无法打开预览");
+        toast.error("无法打开预览");
         setViewerOpen(false);
       } finally {
         setViewerLoading(false);
@@ -163,187 +184,205 @@ export default function TemplatesPage() {
   }, [viewerOpen, pages.length]);
 
   return (
-    <div className="min-h-screen bg-[#f4f2ef] text-[#1a1a1a]">
-      <header className="sticky top-0 z-10 border-b border-black/5 bg-[#f4f2ef]/90 backdrop-blur">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">PPT 模板</h1>
-            <p className="mt-0.5 text-sm text-black/50">
-              来自 agent-output，可逐页预览后加载到编辑器
-            </p>
+    <TooltipProvider delayDuration={200}>
+      <div className="min-h-screen bg-background text-foreground">
+        <Toaster theme={isDark ? "dark" : "light"} position="top-center" />
+        <header className="sticky top-0 z-10 border-b border-border bg-background/90 backdrop-blur">
+          <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold tracking-tight">PPT 模板</h1>
+              <p className="mt-0.5 text-sm text-muted-foreground">
+                来自 agent-output，可逐页预览后加载到编辑器
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <ThemeSwitcher />
+              <Button variant="outline" onClick={() => router.push("/edit")}>
+                返回编辑器
+              </Button>
+            </div>
           </div>
-          <Button type="default" onClick={() => router.push("/editor")}>
-            返回编辑器
-          </Button>
-        </div>
-      </header>
+        </header>
 
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        {loading ? (
-          <div className="flex justify-center py-24">
-            <Spin size="large" />
-          </div>
-        ) : templates.length === 0 ? (
-          <Empty
-            description={
-              <span className="text-black/45">
-                暂无模板。用 agent 生成后放入 agent-output/
-              </span>
-            }
-          />
-        ) : (
-          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {templates.map((tpl) => (
-              <article
-                key={tpl.id}
-                className="flex flex-col overflow-hidden rounded-xl border border-black/8 bg-white shadow-sm"
-              >
-                <button
-                  type="button"
-                  className="relative aspect-video w-full overflow-hidden bg-[#e8e6e1] text-left"
-                  onClick={() => openViewer(tpl)}
+        <main className="mx-auto max-w-6xl px-6 py-8">
+          {loading ? (
+            <div className="flex justify-center py-24">
+              <Loader2 className="size-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : templates.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-24 text-center text-sm text-muted-foreground">
+              <p>暂无模板。用 agent 生成后放入 agent-output/</p>
+            </div>
+          ) : (
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {templates.map((tpl) => (
+                <article
+                  key={tpl.id}
+                  className="flex flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-sm"
                 >
-                  {tpl.previewFile ? (
-                    <div className="pointer-events-none absolute left-0 top-0 origin-top-left scale-[0.3125]">
-                      <iframe
-                        title={`preview-${tpl.id}`}
-                        src={buildTemplateSlideEmbedSrc(tpl.id, tpl.previewFile)}
-                        sandbox="allow-scripts allow-same-origin"
-                        className="border-0"
-                        style={{ width: 1920, height: 1080 }}
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-sm text-black/35">
-                      无预览
-                    </div>
-                  )}
-                  <span className="absolute bottom-2 right-2 rounded bg-black/55 px-2 py-0.5 text-xs text-white">
-                    点击查看全部页
-                  </span>
-                </button>
-                <div className="flex flex-1 flex-col gap-2 p-4">
-                  <div className="flex items-start justify-between gap-2">
-                    <h2 className="text-base font-semibold leading-snug">
-                      {tpl.label.zh_CN || tpl.templateId}
-                    </h2>
-                    <span className="shrink-0 rounded-full bg-black/5 px-2 py-0.5 text-xs text-black/55">
-                      {tpl.slideCount} 页
+                  <button
+                    type="button"
+                    className="relative aspect-video w-full overflow-hidden bg-muted text-left"
+                    onClick={() => openViewer(tpl)}
+                  >
+                    {tpl.previewFile ? (
+                      <div className="pointer-events-none absolute left-0 top-0 origin-top-left scale-[0.3125]">
+                        <iframe
+                          title={`preview-${tpl.id}`}
+                          src={buildTemplateSlideEmbedSrc(
+                            tpl.id,
+                            tpl.previewFile,
+                          )}
+                          sandbox="allow-scripts allow-same-origin"
+                          className="border-0"
+                          style={{ width: 1920, height: 1080 }}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                        无预览
+                      </div>
+                    )}
+                    <span className="absolute bottom-2 right-2 rounded bg-black/55 px-2 py-0.5 text-xs text-white">
+                      点击查看全部页
                     </span>
+                  </button>
+                  <div className="flex flex-1 flex-col gap-2 p-4">
+                    <div className="flex items-start justify-between gap-2">
+                      <h2 className="text-base font-semibold leading-snug">
+                        {tpl.label.zh_CN || tpl.templateId}
+                      </h2>
+                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                        {tpl.slideCount} 页
+                      </span>
+                    </div>
+                    <p className="line-clamp-2 flex-1 text-sm text-muted-foreground">
+                      {tpl.description.zh_CN || tpl.id}
+                    </p>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="flex-1"
+                        onClick={() => openViewer(tpl)}
+                      >
+                        逐页查看
+                      </Button>
+                      <Button
+                        className="flex-1"
+                        disabled={loadingId === tpl.id}
+                        onClick={() => handleLoad(tpl.id)}
+                      >
+                        {loadingId === tpl.id ? (
+                          <Loader2 className="size-4 animate-spin" />
+                        ) : null}
+                        加载到编辑器
+                      </Button>
+                    </div>
                   </div>
-                  <p className="line-clamp-2 flex-1 text-sm text-black/55">
-                    {tpl.description.zh_CN || tpl.id}
-                  </p>
-                  <div className="flex gap-2">
-                    <Button block onClick={() => openViewer(tpl)}>
-                      逐页查看
-                    </Button>
-                    <Button
-                      type="primary"
-                      block
-                      loading={loadingId === tpl.id}
-                      onClick={() => handleLoad(tpl.id)}
-                    >
-                      加载到编辑器
-                    </Button>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </main>
-
-      <Modal
-        open={viewerOpen}
-        onCancel={() => setViewerOpen(false)}
-        width={1040}
-        centered
-        destroyOnClose
-        rootClassName="admin-flat-modal"
-        title={
-          <div className="pr-8">
-            <div className="text-base font-semibold text-black/88">
-              {viewerDoc?.name || "模板预览"}
-            </div>
-            <div className="mt-0.5 text-xs font-normal text-black/45">
-              {pageTitle}
-              {pages.length > 0
-                ? ` · ${pageIndex + 1} / ${pages.length}`
-                : ""}
-              {" · 左右方向键翻页"}
-            </div>
-          </div>
-        }
-        footer={
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Button
-                icon={<LeftOutlined />}
-                disabled={pageIndex <= 0}
-                onClick={() => setPageIndex((i) => Math.max(0, i - 1))}
-              >
-                上一页
-              </Button>
-              <Button
-                icon={<RightOutlined />}
-                disabled={pageIndex >= pages.length - 1}
-                onClick={() =>
-                  setPageIndex((i) => Math.min(pages.length - 1, i + 1))
-                }
-              >
-                下一页
-              </Button>
-            </div>
-            <div className="flex gap-2">
-              <Button onClick={() => setViewerOpen(false)}>关闭</Button>
-              <Button
-                type="primary"
-                loading={!!viewerTplId && loadingId === viewerTplId}
-                disabled={!viewerDoc || !viewerTplId}
-                onClick={() => {
-                  if (viewerTplId && viewerDoc) {
-                    void handleLoad(viewerTplId, viewerDoc);
-                  }
-                }}
-              >
-                加载到编辑器
-              </Button>
-            </div>
-          </div>
-        }
-      >
-        {viewerLoading || !currentEmbedSrc ? (
-          <div className="flex justify-center py-16">
-            <Spin size="large" />
-          </div>
-        ) : (
-          <div className="flex flex-col items-center gap-4">
-            <SlideFrame
-              key={current!.id}
-              src={currentEmbedSrc}
-              title={current!.id}
-              scale={MODAL_SCALE}
-            />
-            <div className="flex max-w-full flex-wrap justify-center gap-2">
-              {pages.map((p, i) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setPageIndex(i)}
-                  className={`h-8 min-w-8 rounded px-2 text-xs ${
-                    i === pageIndex
-                      ? "bg-[#f25f00] text-white"
-                      : "bg-black/5 text-black/65 hover:bg-black/10"
-                  }`}
-                >
-                  {i + 1}
-                </button>
+                </article>
               ))}
             </div>
-          </div>
-        )}
-      </Modal>
-    </div>
+          )}
+        </main>
+
+        <Dialog open={viewerOpen} onOpenChange={setViewerOpen}>
+          <DialogContent className="max-w-[1040px] gap-0 overflow-hidden border-border bg-background p-0 text-foreground">
+            <DialogHeader className="border-b border-border px-6 py-4 text-left">
+              <DialogTitle className="pr-8 text-base font-semibold">
+                {viewerDoc?.name || "模板预览"}
+              </DialogTitle>
+              <p className="text-xs font-normal text-muted-foreground">
+                {pageTitle}
+                {pages.length > 0
+                  ? ` · ${pageIndex + 1} / ${pages.length}`
+                  : ""}
+                {" · 左右方向键翻页"}
+              </p>
+            </DialogHeader>
+
+            <div className="px-6 py-5">
+              {viewerLoading || !currentEmbedSrc ? (
+                <div className="flex justify-center py-16">
+                  <Loader2 className="size-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-4">
+                  <SlideFrame
+                    key={current!.id}
+                    src={currentEmbedSrc}
+                    title={current!.id}
+                    scale={MODAL_SCALE}
+                  />
+                  <div className="flex max-w-full flex-wrap justify-center gap-2">
+                    {pages.map((p, i) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setPageIndex(i)}
+                        className={cn(
+                          "h-8 min-w-8 rounded px-2 text-xs transition-colors",
+                          i === pageIndex
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground",
+                        )}
+                      >
+                        {i + 1}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <DialogFooter className="flex-row flex-wrap items-center justify-between gap-3 border-t border-border px-6 py-4 sm:justify-between">
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={pageIndex <= 0}
+                  onClick={() => setPageIndex((i) => Math.max(0, i - 1))}
+                >
+                  <ChevronLeft className="size-4" />
+                  上一页
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={pageIndex >= pages.length - 1}
+                  onClick={() =>
+                    setPageIndex((i) => Math.min(pages.length - 1, i + 1))
+                  }
+                >
+                  下一页
+                  <ChevronRight className="size-4" />
+                </Button>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setViewerOpen(false)}>
+                  关闭
+                </Button>
+                <Button
+                  disabled={
+                    !viewerDoc ||
+                    !viewerTplId ||
+                    (!!viewerTplId && loadingId === viewerTplId)
+                  }
+                  onClick={() => {
+                    if (viewerTplId && viewerDoc) {
+                      void handleLoad(viewerTplId, viewerDoc);
+                    }
+                  }}
+                >
+                  {viewerTplId && loadingId === viewerTplId ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : null}
+                  加载到编辑器
+                </Button>
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
+    </TooltipProvider>
   );
 }

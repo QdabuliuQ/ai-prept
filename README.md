@@ -22,7 +22,7 @@ npm run dev
 
 打开 [http://127.0.0.1:5174](http://127.0.0.1:5174)。
 
-路由：`/` 模板墙 · `/editor` 编辑器 · `/admin` 后台 · `/templates` 本地模板库。  
+路由：`/` 模板墙 · `/edit` 编辑器 · `/admin` 后台 · `/templates` 本地模板库。  
 `/api/*`、`/embed/*` 由 Vite 代理到 `GALLERY_API_URL`（默认 `http://127.0.0.1:8787`）。
 
 ## 构建

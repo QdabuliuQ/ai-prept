@@ -4,12 +4,15 @@ import {
   PanelSelect,
   PanelSplitLine,
 } from "@/components";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { usePageActiveStore, usePPTStore } from "@/store/zustand";
 import { FullSelection } from "@icon-park/react";
 import { useMemoizedFn } from "ahooks";
-import { Checkbox, InputNumber, message } from "antd";
 import { useMemo, useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import styles from "./index.module.less";
 
 const TOGGLE_ANIMATION_TYPES = [
@@ -112,10 +115,13 @@ const ToggleComponent: FC = () => {
   );
 
   const durationOptions = useMemo(
-    () => getToggleInDurationOptions(t),
-    [t]
+    () => getToggleInDurationOptions(t as TranslateFn),
+    [t],
   );
-  const delayOptions = useMemo(() => getToggleInDelayOptions(t), [t]);
+  const delayOptions = useMemo(
+    () => getToggleInDelayOptions(t as TranslateFn),
+    [t],
+  );
 
   const displayAnimations = toggleInAnimationName.slice(0, 6);
   const moreAnimations = toggleInAnimationName.slice(6);
@@ -141,24 +147,20 @@ const ToggleComponent: FC = () => {
     updatePagePropertyAction(pageActive, "toggleInDelay", value);
   });
 
-  const handleKeyboardToggleChange = useMemoizedFn(
-    (e: { target: { checked: boolean } }) => {
-      setKeyboardToggle(e.target.checked);
-    }
-  );
+  const handleKeyboardToggleChange = useMemoizedFn((checked: boolean) => {
+    setKeyboardToggle(checked);
+  });
 
-  const handleAutoToggleChange = useMemoizedFn(
-    (e: { target: { checked: boolean } }) => {
-      if (!pageActive) return;
-      updatePagePropertyAction(pageActive, "autoToggle", e.target.checked);
-    }
-  );
+  const handleAutoToggleChange = useMemoizedFn((checked: boolean) => {
+    if (!pageActive) return;
+    updatePagePropertyAction(pageActive, "autoToggle", checked);
+  });
 
-  const handleAutoToggleTimeChange = useMemoizedFn((value: number | null) => {
-    if (value !== null && pageActive) {
-      if (value === currentAutoToggleTime) return;
-      updatePagePropertyAction(pageActive, "autoToggleTime", value);
-    }
+  const handleAutoToggleTimeChange = useMemoizedFn((raw: string) => {
+    const value = Number(raw);
+    if (!Number.isFinite(value) || !pageActive) return;
+    if (value === currentAutoToggleTime) return;
+    updatePagePropertyAction(pageActive, "autoToggleTime", value);
   });
 
   const handleApplyToAll = useMemoizedFn(() => {
@@ -176,35 +178,35 @@ const ToggleComponent: FC = () => {
       updatePagePropertyAction(
         page.id,
         "toggleInAnimation",
-        toggleSettings.toggleInAnimation
+        toggleSettings.toggleInAnimation,
       );
       updatePagePropertyAction(
         page.id,
         "toggleInDuration",
-        toggleSettings.toggleInDuration
+        toggleSettings.toggleInDuration,
       );
       updatePagePropertyAction(
         page.id,
         "toggleInDelay",
-        toggleSettings.toggleInDelay
+        toggleSettings.toggleInDelay,
       );
       updatePagePropertyAction(
         page.id,
         "autoToggle",
-        toggleSettings.autoToggle
+        toggleSettings.autoToggle,
       );
       updatePagePropertyAction(
         page.id,
         "autoToggleTime",
-        toggleSettings.autoToggleTime
+        toggleSettings.autoToggleTime,
       );
     });
 
-    message.success(t("togglePanel.applySuccess"));
+    toast.success(t("togglePanel.applySuccess"));
   });
 
   return (
-    <div className="flex gap-[10px] h-[53px]">
+    <div className="flex h-[53px] gap-[10px]">
       <PanelItemSelect
         displayItems={displayAnimations}
         moreItems={moreAnimations}
@@ -215,63 +217,71 @@ const ToggleComponent: FC = () => {
         hoveredValue={animationName}
       />
       <PanelSplitLine />
-      <div className="flex flex-col justify-between gap-[4px] mr-[5px]">
+      <div className="mr-[5px] flex flex-col justify-between gap-[4px]">
         <div className="flex items-center gap-[4px]">
-          <span className="text-[12px] text-chrome-muted mr-[5px]">
+          <span className="mr-[5px] text-[12px] text-chrome-muted">
             {t("togglePanel.duration")}
           </span>
           <PanelSelect
             value={currentToggleInDuration}
             options={durationOptions}
-            size="small"
             style={{ width: 70 }}
             onChange={handleToggleInDurationChange}
           />
         </div>
         <div className="flex items-center gap-[4px]">
-          <span className="text-[12px] text-chrome-muted mr-[5px]">
+          <span className="mr-[5px] text-[12px] text-chrome-muted">
             {t("togglePanel.delay")}
           </span>
           <PanelSelect
             value={currentToggleInDelay}
             options={delayOptions}
-            size="small"
             style={{ width: 70 }}
             onChange={handleToggleInDelayChange}
           />
         </div>
       </div>
       <div className="flex flex-col justify-between gap-[4px]">
-        <div className="flex items-center gap-[4px] text-[12px] h-[24px]">
+        <div className="flex h-[24px] items-center gap-[6px] text-[12px]">
           <Checkbox
+            id="keyboard-toggle"
             checked={keyboardToggle}
-            onChange={handleKeyboardToggleChange}
-            style={{ fontSize: "12px" }}
+            onCheckedChange={(v) => handleKeyboardToggleChange(v === true)}
+          />
+          <Label
+            htmlFor="keyboard-toggle"
+            className="cursor-pointer text-[12px] font-normal text-chrome-secondary"
           >
             {t("togglePanel.keyboardToggle")}
-          </Checkbox>
+          </Label>
         </div>
-        <div className={`flex items-center gap-[4px] ${styles.checkboxCustom}`}>
+        <div className={`flex items-center gap-[6px] ${styles.checkboxCustom}`}>
           <Checkbox
-            value={currentAutoToggle}
-            onChange={handleAutoToggleChange}
-            style={{ fontSize: "12px" }}
+            id="auto-toggle"
+            checked={currentAutoToggle}
+            onCheckedChange={(v) => handleAutoToggleChange(v === true)}
+          />
+          <Label
+            htmlFor="auto-toggle"
+            className="cursor-pointer text-[12px] font-normal text-chrome-secondary"
           >
             {t("togglePanel.autoToggle")}
-          </Checkbox>
-          <InputNumber
+          </Label>
+          <Input
+            type="number"
             disabled={!currentAutoToggle}
-            size="small"
             value={currentAutoToggleTime}
-            style={{ width: 70 }}
-            onChange={handleAutoToggleTimeChange}
+            className="h-6 w-[70px] px-2 text-[12px]"
+            onChange={(e) => handleAutoToggleTimeChange(e.target.value)}
           />
         </div>
       </div>
       <PanelSplitLine />
       <PanelLargeButton
         title={t("togglePanel.applyAll")}
-        icon={<FullSelection theme="outline" size="18" fill="var(--icon-color)" />}
+        icon={
+          <FullSelection theme="outline" size="18" fill="var(--icon-color)" />
+        }
         onClick={handleApplyToAll}
       />
     </div>

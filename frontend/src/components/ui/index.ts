@@ -84,3 +84,10 @@ export {
 export { Popover, PopoverTrigger, PopoverContent, PopoverAnchor } from "./popover";
 export { ScrollArea, ScrollBar } from "./scroll-area";
 export { Toaster } from "./sonner";
+export {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "./tooltip";
+export { Slider } from "./slider";

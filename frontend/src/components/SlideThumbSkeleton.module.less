@@ -1,0 +1,111 @@
+.root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--thumb-bg);
+}
+
+.shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    var(--skeleton-from) 0%,
+    var(--skeleton-from) 38%,
+    var(--skeleton-mid) 50%,
+    var(--skeleton-from) 62%,
+    var(--skeleton-from) 100%
+  );
+  background-size: 220% 100%;
+  animation: slideThumbShimmer 1.5s ease-in-out infinite;
+  opacity: 0.55;
+}
+
+.content {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  padding: 10% 8%;
+  display: flex;
+  flex-direction: column;
+  gap: 4%;
+}
+
+.kicker,
+.title,
+.sub,
+.line,
+.card,
+.media {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--skeleton-mid) 72%, var(--thumb-bg));
+}
+
+.kicker {
+  width: 22%;
+  height: 6%;
+  max-height: 10px;
+  min-height: 4px;
+}
+
+.title {
+  width: 72%;
+  height: 12%;
+  max-height: 18px;
+  min-height: 8px;
+  border-radius: 5px;
+}
+
+.sub {
+  width: 48%;
+  height: 7%;
+  max-height: 10px;
+  min-height: 4px;
+  margin-bottom: 4%;
+}
+
+.grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 0.85fr;
+  gap: 6%;
+}
+
+.col {
+  display: flex;
+  flex-direction: column;
+  gap: 8%;
+  min-height: 0;
+}
+
+.line {
+  width: 92%;
+  height: 8%;
+  max-height: 8px;
+  min-height: 3px;
+}
+
+.lineShort {
+  width: 64%;
+}
+
+.card {
+  flex: 1;
+  min-height: 12px;
+  border-radius: 6px;
+}
+
+.media {
+  height: 100%;
+  border-radius: 8px;
+}
+
+@keyframes slideThumbShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}

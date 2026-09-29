@@ -47,7 +47,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ["antd", "@ant-design/icons", "lodash", "zustand"],
+    include: ["lodash", "zustand"],
   },
   build: {
     outDir: path.resolve(frontendDir, "dist"),

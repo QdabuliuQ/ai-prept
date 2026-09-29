@@ -17,6 +17,23 @@ import { cn } from "@/lib/utils";
 import type { GenerateJob, TemplateStatus } from "./types";
 import { PREVIEW_SCALE, STATUS_LABEL } from "./types";
 
+/** Soft status / tag colors that stay readable in light and dark mode. */
+export const toneBadge = {
+  emerald:
+    "border-transparent bg-emerald-100 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-900/40 dark:text-emerald-300 dark:hover:bg-emerald-900/40",
+  emeraldSoft:
+    "border-transparent bg-emerald-50 text-emerald-800 hover:bg-emerald-50 dark:bg-emerald-900/30 dark:text-emerald-300 dark:hover:bg-emerald-900/30",
+  amber:
+    "border-transparent bg-amber-100 text-amber-800 hover:bg-amber-100 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:bg-amber-900/40",
+  amberStrong:
+    "border-transparent bg-amber-100 text-amber-900 hover:bg-amber-100 dark:bg-amber-900/40 dark:text-amber-200 dark:hover:bg-amber-900/40",
+  sky: "border-transparent bg-sky-100 text-sky-800 hover:bg-sky-100 dark:bg-sky-900/40 dark:text-sky-300 dark:hover:bg-sky-900/40",
+  violet:
+    "border-transparent bg-violet-100 text-violet-800 hover:bg-violet-100 dark:bg-violet-900/40 dark:text-violet-300 dark:hover:bg-violet-900/40",
+  cyan: "border-transparent bg-cyan-100 text-cyan-800 hover:bg-cyan-100 dark:bg-cyan-900/40 dark:text-cyan-300 dark:hover:bg-cyan-900/40",
+  rose: "border-transparent bg-rose-100 text-rose-900 hover:bg-rose-100 dark:bg-rose-900/40 dark:text-rose-200 dark:hover:bg-rose-900/40",
+} as const;
+
 export function formatTokenCount(n: number | null | undefined): string {
   if (n == null || Number.isNaN(n)) return "—";
   if (n >= 10000) return `${(n / 1000).toFixed(1)}k`;
@@ -115,11 +132,11 @@ export function AdminSlideFrame({
 
   return (
     <div
-      className="relative overflow-hidden rounded bg-[#e8e6e1] shadow-sm"
+      className="relative overflow-hidden rounded bg-muted shadow-sm"
       style={{ width: w, height: h }}
     >
       {loading ? (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-[#e8e6e1]/90">
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-muted/90">
           <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
           <span className="text-xs text-muted-foreground">加载中…</span>
         </div>
@@ -218,55 +235,33 @@ export function JobProgressBar({ job }: { job: GenerateJob }) {
 
 export function jobStatusBadge(status: string) {
   if (status === "succeeded") {
-    return (
-      <Badge className="border-transparent bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
-        {status}
-      </Badge>
-    );
+    return <Badge className={toneBadge.emerald}>{status}</Badge>;
   }
   if (status === "failed") {
     return <Badge variant="destructive">{status}</Badge>;
   }
   if (status === "cancelled") {
-    return (
-      <Badge className="border-transparent bg-amber-100 text-amber-800 hover:bg-amber-100">
-        {status}
-      </Badge>
-    );
+    return <Badge className={toneBadge.amber}>{status}</Badge>;
   }
   if (status === "running") {
-    return (
-      <Badge className="border-transparent bg-sky-100 text-sky-800 hover:bg-sky-100">
-        {status}
-      </Badge>
-    );
+    return <Badge className={toneBadge.sky}>{status}</Badge>;
   }
   if (status === "awaiting_html") {
-    return (
-      <Badge className="border-transparent bg-violet-100 text-violet-800 hover:bg-violet-100">
-        浏览器转换中…
-      </Badge>
-    );
+    return <Badge className={toneBadge.violet}>浏览器转换中…</Badge>;
   }
   return <Badge variant="secondary">{status}</Badge>;
 }
 
 export function templateStatusBadge(status: TemplateStatus) {
   if (status === "approved") {
-    return (
-      <Badge className="border-transparent bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
-        {STATUS_LABEL[status]}
-      </Badge>
-    );
+    return <Badge className={toneBadge.emerald}>{STATUS_LABEL[status]}</Badge>;
   }
   if (status === "rejected") {
     return <Badge variant="destructive">{STATUS_LABEL[status]}</Badge>;
   }
   if (status === "pending") {
     return (
-      <Badge className="border-transparent bg-amber-100 text-amber-900 hover:bg-amber-100">
-        {STATUS_LABEL[status]}
-      </Badge>
+      <Badge className={toneBadge.amberStrong}>{STATUS_LABEL[status]}</Badge>
     );
   }
   return <Badge variant="secondary">{STATUS_LABEL[status]}</Badge>;
@@ -284,7 +279,7 @@ export function templateRenderBadge(
     return (
       <Badge
         variant="destructive"
-        className="border-transparent bg-rose-100 text-rose-900 hover:bg-rose-100"
+        className={toneBadge.rose}
         title="svg_to_pptx / 转 HTML 失败，仅为整页 SVG 预览包，不可当标准可编辑 html-slide"
       >
         未转 HTML
@@ -294,10 +289,7 @@ export function templateRenderBadge(
   const r = String(render || "").toLowerCase();
   if (r === "html-slide" || r === "html") {
     return (
-      <Badge
-        className="border-transparent bg-emerald-50 text-emerald-800 hover:bg-emerald-50"
-        title="标准 html-slide 可编辑包"
-      >
+      <Badge className={toneBadge.emeraldSoft} title="标准 html-slide 可编辑包">
         HTML
       </Badge>
     );
@@ -305,7 +297,7 @@ export function templateRenderBadge(
   if (r === "svg") {
     return (
       <Badge
-        className="border-transparent bg-cyan-100 text-cyan-800 hover:bg-cyan-100"
+        className={toneBadge.cyan}
         title="PPT Master SVG 线路（已成功导出 PPTX 并转包）"
       >
         SVG→HTML

@@ -493,10 +493,31 @@ def _strip_slow_cdns(html: str) -> str:
 def _rewrite_asset_urls(html: str, template_id: str) -> str:
     from urllib.parse import quote
 
+    from admin.fsutil import template_dir
+
     base = f"/api/html-templates/{quote(template_id)}/assets"
+    try:
+        pack_root = template_dir(template_id)
+    except Exception:
+        pack_root = None
+
+    def _bust(rel: str) -> str:
+        """Append mtime so iframe reloads after rematerialize overwrite."""
+        path_rel = rel.lstrip("/")
+        # strip existing query from relative path in HTML if any
+        path_only = path_rel.split("?", 1)[0]
+        if pack_root is not None:
+            fp = pack_root / path_only
+            try:
+                if fp.is_file():
+                    v = int(fp.stat().st_mtime)
+                    return f"{path_only}?v={v}"
+            except OSError:
+                pass
+        return path_only
 
     def repl_attr(m: re.Match[str]) -> str:
-        return f"{m.group(1)}={m.group(2)}{base}/{m.group(3).lstrip('/')}{m.group(2)}"
+        return f"{m.group(1)}={m.group(2)}{base}/{_bust(m.group(3))}{m.group(2)}"
 
     out = re.sub(
         r'\b(href|src)=(["\'])\.\./([^"\']+)\2',
@@ -507,7 +528,7 @@ def _rewrite_asset_urls(html: str, template_id: str) -> str:
 
     def repl_url(m: re.Match[str]) -> str:
         q = m.group(1) or ""
-        return f"url({q}{base}/{m.group(2).lstrip('/')}{q})"
+        return f"url({q}{base}/{_bust(m.group(2))}{q})"
 
     out = re.sub(
         r"url\(\s*(['\"]?)\.\./([^)'\"]+)\1\s*\)",

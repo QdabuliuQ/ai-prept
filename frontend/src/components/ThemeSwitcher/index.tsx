@@ -1,34 +1,35 @@
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useThemeStore } from "@/store";
-import { Moon, Sun } from "@icon-park/react";
-import { Button, Tooltip } from "antd";
 import { useMemoizedFn } from "ahooks";
+import { Moon, Sun } from "lucide-react";
 
 const ThemeSwitcher = () => {
   const theme = useThemeStore((state) => state.theme);
   const toggleTheme = useThemeStore((state) => state.toggleTheme);
-
-  const handleToggle = useMemoizedFn(() => {
-    toggleTheme();
-  });
-
+  const handleToggle = useMemoizedFn(() => toggleTheme());
   const isDark = theme === "dark";
+  const label = isDark ? "切换到亮色模式" : "切换到暗色模式";
 
   return (
-    <Tooltip placement="bottom" title={isDark ? "切换到亮色模式" : "切换到暗色模式"}>
-      <Button
-        size="small"
-        type="text"
-        aria-label={isDark ? "切换到亮色模式" : "切换到暗色模式"}
-        onClick={handleToggle}
-        icon={
-          isDark ? (
-            <Sun theme="outline" size="16" fill="currentColor" />
-          ) : (
-            <Moon theme="outline" size="16" fill="currentColor" />
-          )
-        }
-        style={{ display: "flex", alignItems: "center" }}
-      />
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label={label}
+          onClick={handleToggle}
+          className="h-[30px] w-[30px] px-0 text-[var(--text-secondary)] hover:bg-[var(--hover-bg)] hover:text-[var(--primary-color)]"
+        >
+          {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{label}</TooltipContent>
     </Tooltip>
   );
 };

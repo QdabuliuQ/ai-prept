@@ -10,9 +10,11 @@ export {
   useCanvasZoomStore,
   useThemeStore,
   useChartInspectorStore,
+  useGalleryRemixStore,
+  useSlideSelectionStore,
 } from "./zustand";
 
-export type { Page, ThemeMode } from "./zustand";
+export type { Page, ThemeMode, TextStylePatch } from "./zustand";
 
 // Export compatibility layers (for gradual migration)
 export {

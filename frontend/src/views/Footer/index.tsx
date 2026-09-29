@@ -1,4 +1,16 @@
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Slider } from "@/components/ui/slider";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   useCanvasZoomStore,
   useDisplayStatusStore,
   useFullscreenStore,
@@ -16,9 +28,9 @@ import {
   ViewGridCard,
 } from "@icon-park/react";
 import { useMemoizedFn } from "ahooks";
-import { Dropdown, message, Slider, Tooltip } from "antd";
 import { useMemo, type FC } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import styles from "./index.module.less";
 
 const FooterComponent: FC = () => {
@@ -27,13 +39,13 @@ const FooterComponent: FC = () => {
   const pageActive = usePageActiveStore((state) => state.pageActive);
   const displayStatus = useDisplayStatusStore((state) => state.displayStatus);
   const setDisplayStatus = useDisplayStatusStore(
-    (state) => state.setDisplayStatus
+    (state) => state.setDisplayStatus,
   );
   const remarkEditActive = useRemarkEditActiveStore(
-    (state) => state.remarkEditActive
+    (state) => state.remarkEditActive,
   );
   const toggleRemarkEditActive = useRemarkEditActiveStore(
-    (state) => state.toggleRemarkEditActive
+    (state) => state.toggleRemarkEditActive,
   );
   const enterFullscreen = useFullscreenStore((state) => state.enterFullscreen);
   const zoomPercent = useCanvasZoomStore((state) => state.zoomPercent);
@@ -47,7 +59,7 @@ const FooterComponent: FC = () => {
 
   const handlePlay = useMemoizedFn(() => {
     if (!pageActive) {
-      message.error(t("playPanel.noCurrentPage"));
+      toast.error(t("playPanel.noCurrentPage"));
       return;
     }
     enterFullscreen(pageActive);
@@ -55,7 +67,7 @@ const FooterComponent: FC = () => {
 
   const handlePlayFromFirst = useMemoizedFn(() => {
     if (pages.length === 0) {
-      message.error(t("playPanel.noPages"));
+      toast.error(t("playPanel.noPages"));
       return;
     }
     enterFullscreen(pages[0].id);
@@ -63,28 +75,28 @@ const FooterComponent: FC = () => {
 
   const handlePlayFromCurrent = useMemoizedFn(() => {
     if (!pageActive) {
-      message.error(t("playPanel.noCurrentPage"));
+      toast.error(t("playPanel.noCurrentPage"));
       return;
     }
     enterFullscreen(pageActive);
   });
 
-  const playDropDownMenu = useMemo(
+  const playItems = useMemo(
     () => [
       {
         key: "playFirst",
         label: t("footer.fromStart"),
         icon: <SlideTwo theme="outline" size="15" fill="currentColor" />,
-        onClick: handlePlayFromFirst,
+        onSelect: handlePlayFromFirst,
       },
       {
         key: "playCurrent",
         label: t("footer.fromCurrent"),
         icon: <Play theme="outline" size="15" fill="currentColor" />,
-        onClick: handlePlayFromCurrent,
+        onSelect: handlePlayFromCurrent,
       },
     ],
-    [handlePlayFromFirst, handlePlayFromCurrent, t]
+    [handlePlayFromFirst, handlePlayFromCurrent, t],
   );
 
   return (
@@ -122,53 +134,75 @@ const FooterComponent: FC = () => {
             <PlayOne theme="filled" size="14" fill="#fff" />
             <span>{t("footer.play")}</span>
           </button>
-          <Dropdown placement="topRight" menu={{ items: playDropDownMenu }}>
-            <button
-              type="button"
-              className={styles.playCaret}
-              aria-label={t("footer.playOptions")}
-            >
-              <Down theme="outline" size="12" fill="#fff" />
-            </button>
-          </Dropdown>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className={styles.playCaret}
+                aria-label={t("footer.playOptions")}
+              >
+                <Down theme="outline" size="12" fill="#fff" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="top" className="text-[12px]">
+              {playItems.map((item) => (
+                <DropdownMenuItem
+                  key={item.key}
+                  className="gap-2 text-[12px]"
+                  onSelect={item.onSelect}
+                >
+                  {item.icon}
+                  {item.label}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         <div className={styles.divider} />
 
         <div className={styles.viewToggles}>
-          <Tooltip title={t("viewPanel.normalView")}>
-            <button
-              type="button"
-              className={`${styles.viewBtn} ${displayStatus === "default" ? styles.viewActive : ""}`}
-              onClick={() => setDisplayStatus("default")}
-            >
-              <Column
-                theme="outline"
-                size="15"
-                fill={
-                  displayStatus === "default"
-                    ? "var(--primary-color)"
-                    : "var(--text-secondary)"
-                }
-              />
-            </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${displayStatus === "default" ? styles.viewActive : ""}`}
+                onClick={() => setDisplayStatus("default")}
+              >
+                <Column
+                  theme="outline"
+                  size="15"
+                  fill={
+                    displayStatus === "default"
+                      ? "var(--primary-color)"
+                      : "var(--text-secondary)"
+                  }
+                />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">{t("viewPanel.normalView")}</TooltipContent>
           </Tooltip>
-          <Tooltip title={t("viewPanel.slidePreview")}>
-            <button
-              type="button"
-              className={`${styles.viewBtn} ${displayStatus === "grid" ? styles.viewActive : ""}`}
-              onClick={() => setDisplayStatus("grid")}
-            >
-              <ViewGridCard
-                theme="outline"
-                size="15"
-                fill={
-                  displayStatus === "grid"
-                    ? "var(--primary-color)"
-                    : "var(--text-secondary)"
-                }
-              />
-            </button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${displayStatus === "grid" ? styles.viewActive : ""}`}
+                onClick={() => setDisplayStatus("grid")}
+              >
+                <ViewGridCard
+                  theme="outline"
+                  size="15"
+                  fill={
+                    displayStatus === "grid"
+                      ? "var(--primary-color)"
+                      : "var(--text-secondary)"
+                  }
+                />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="top">
+              {t("viewPanel.slidePreview")}
+            </TooltipContent>
           </Tooltip>
         </div>
 
@@ -181,9 +215,9 @@ const FooterComponent: FC = () => {
                 min={10}
                 max={200}
                 step={1}
-                value={zoomPercent}
-                onChange={setZoomPercent}
-                tooltip={{ formatter: (value) => `${value}%` }}
+                value={[zoomPercent]}
+                onValueChange={(vals) => setZoomPercent(vals[0] ?? zoomPercent)}
+                aria-label="zoom"
               />
               <span className={styles.zoomLabel}>{zoomPercent}%</span>
             </div>

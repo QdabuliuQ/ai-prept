@@ -26,6 +26,13 @@ import { toast } from "sonner";
 import logo from "@/assets/images/ai-prept-logo.png";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
@@ -48,6 +55,52 @@ type GalleryTemplate = {
   category?: string;
   updatedAt: number;
 };
+
+type GalleryModelOption = { id: string; label: string };
+type GalleryProviderOption = {
+  id: string;
+  label: string;
+  tier?: string;
+  models: GalleryModelOption[];
+  configured: boolean;
+};
+
+type GalleryModelPrefs = {
+  llmProvider: string;
+  llmModel: string;
+  imageProvider: string;
+  imageModel: string;
+};
+
+const GALLERY_MODEL_PREFS_KEY = "webppt:gallery-model-prefs";
+
+const dockSelectTriggerClass =
+  "h-8 w-auto max-w-[10.5rem] shrink-0 gap-1 rounded-full border-0 bg-white/10 px-3 text-[11px] font-medium text-white/85 shadow-none ring-1 ring-white/12 hover:bg-white/14 hover:text-white focus:ring-2 focus:ring-white/35 disabled:opacity-50 [&>span]:line-clamp-1 [&>svg]:size-3 [&>svg]:opacity-60";
+
+const dockSelectContentClass =
+  "z-[80] max-h-72 border-white/10 bg-[#1a1917] text-white shadow-[0_16px_48px_rgba(0,0,0,0.55)]";
+
+const dockSelectItemClass =
+  "cursor-pointer text-xs text-white/85 focus:bg-white/10 focus:text-white data-[disabled]:opacity-40";
+
+function readModelPrefs(): Partial<GalleryModelPrefs> {
+  try {
+    const raw = localStorage.getItem(GALLERY_MODEL_PREFS_KEY);
+    if (!raw) return {};
+    const data = JSON.parse(raw) as Partial<GalleryModelPrefs>;
+    return data && typeof data === "object" ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeModelPrefs(prefs: GalleryModelPrefs) {
+  try {
+    localStorage.setItem(GALLERY_MODEL_PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    /* ignore */
+  }
+}
 
 type SizeKey = "sm" | "lg";
 
@@ -519,7 +572,148 @@ export default function GalleryHome() {
   const [inspiring, setInspiring] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [filter, setFilter] = useState<string>("all");
+  const [llmProviders, setLlmProviders] = useState<GalleryProviderOption[]>([]);
+  const [imageProviders, setImageProviders] = useState<GalleryProviderOption[]>(
+    [],
+  );
+  const [llmProvider, setLlmProvider] = useState("gemini");
+  const [llmModel, setLlmModel] = useState("gemini-3.8-flash");
+  const [imageProvider, setImageProvider] = useState("siliconflow");
+  const [imageModel, setImageModel] = useState("Kwai-Kolors/Kolors");
+  const [modelsReady, setModelsReady] = useState(false);
+  const [openModelSelect, setOpenModelSelect] = useState<
+    null | "llmProvider" | "llmModel" | "imageProvider" | "imageModel"
+  >(null);
   const router = useRouter();
+
+  const onModelSelectOpenChange = useMemoizedFn(
+    (
+      key: "llmProvider" | "llmModel" | "imageProvider" | "imageModel",
+      open: boolean,
+    ) => {
+      if (open) {
+        setOpenModelSelect(key);
+        return;
+      }
+      // 切到另一个下拉时，先收到旧的 close；不要清掉新打开的 key
+      setOpenModelSelect((cur) => (cur === key ? null : cur));
+    },
+  );
+
+  // 预取编辑器分包，缩短「开始生成 → /edit」白屏
+  useEffect(() => {
+    void import("@/spa/EditorPage");
+  }, []);
+
+  // 文本 / 图片模型目录
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/gallery/models");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          llmProviders?: GalleryProviderOption[];
+          imageProviders?: GalleryProviderOption[];
+          defaults?: Partial<GalleryModelPrefs>;
+        };
+        if (cancelled) return;
+        const llms = data.llmProviders || [];
+        const images = data.imageProviders || [];
+        setLlmProviders(llms);
+        setImageProviders(images);
+        const saved = readModelPrefs();
+        const defaults = data.defaults || {};
+
+        const pickProvider = (
+          list: GalleryProviderOption[],
+          prefer?: string,
+          fallback?: string,
+        ) => {
+          const configured = list.filter((p) => p.configured && p.models?.length);
+          const pool = configured.length ? configured : list;
+          return (
+            pool.find((p) => p.id === prefer) ||
+            pool.find((p) => p.id === fallback) ||
+            pool[0]
+          );
+        };
+
+        const pickModel = (
+          provider: GalleryProviderOption | undefined,
+          prefer?: string,
+        ) => {
+          const models = provider?.models || [];
+          if (!models.length) return "";
+          return (
+            models.find((m) => m.id === prefer)?.id || models[0].id
+          );
+        };
+
+        const lp = pickProvider(
+          llms,
+          saved.llmProvider || defaults.llmProvider,
+          "groq",
+        );
+        const ip = pickProvider(
+          images,
+          saved.imageProvider || defaults.imageProvider,
+          "siliconflow",
+        );
+        const lm = pickModel(lp, saved.llmModel || defaults.llmModel);
+        const im = pickModel(ip, saved.imageModel || defaults.imageModel);
+        if (lp) setLlmProvider(lp.id);
+        if (lm) setLlmModel(lm);
+        if (ip) setImageProvider(ip.id);
+        if (im) setImageModel(im);
+        setModelsReady(true);
+      } catch {
+        if (!cancelled) setModelsReady(true);
+        /* ignore catalog errors — remix 仍可用服务端默认 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!modelsReady) return;
+    writeModelPrefs({
+      llmProvider,
+      llmModel,
+      imageProvider,
+      imageModel,
+    });
+  }, [modelsReady, llmProvider, llmModel, imageProvider, imageModel]);
+
+  const llmModelOptions = useMemo(() => {
+    const p = llmProviders.find((x) => x.id === llmProvider);
+    return p?.models || [];
+  }, [llmProviders, llmProvider]);
+
+  const imageModelOptions = useMemo(() => {
+    const p = imageProviders.find((x) => x.id === imageProvider);
+    return p?.models || [];
+  }, [imageProviders, imageProvider]);
+
+  const onLlmProviderChange = useMemoizedFn((id: string) => {
+    setLlmProvider(id);
+    const p = llmProviders.find((x) => x.id === id);
+    const next = p?.models?.[0]?.id;
+    if (next) setLlmModel(next);
+  });
+
+  const onImageProviderChange = useMemoizedFn((id: string) => {
+    setImageProvider(id);
+    const p = imageProviders.find((x) => x.id === id);
+    const next =
+      id === "siliconflow"
+        ? p?.models?.find((m) => m.id === "Kwai-Kolors/Kolors")?.id ||
+          p?.models?.[0]?.id
+        : p?.models?.[0]?.id;
+    if (next) setImageModel(next);
+  });
 
   const filters = useMemo(
     () => [...STATIC_FILTERS, ...galleryCategoryFilters(source, categories)],
@@ -696,7 +890,7 @@ export default function GalleryHome() {
     }
     setGenerating(true);
     const toastId = "gallery-remix";
-    toast.loading("正在按模板生成内容…", { id: toastId });
+    toast.loading("正在启动套用任务…", { id: toastId });
     try {
       const res = await fetch("/api/gallery/remix", {
         method: "POST",
@@ -704,7 +898,12 @@ export default function GalleryHome() {
         body: JSON.stringify({
           templateId: tid,
           prompt: brief,
-          skipImage: true,
+          // 默认替换图片（与后台使用模板一致）
+          skipImage: false,
+          llmProvider,
+          llmModel,
+          imageProvider,
+          imageModel,
         }),
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -720,53 +919,16 @@ export default function GalleryHome() {
       const jobId = String(data.job?.id || "").trim();
       if (!jobId) throw new Error("未返回任务 id");
 
-      let newId = "";
-      for (let i = 0; i < 120; i++) {
-        await new Promise((r) => setTimeout(r, 2000));
-        const jr = await fetch(
-          `/api/gallery/jobs/${encodeURIComponent(jobId)}`,
-        );
-        const jd = (await jr.json().catch(() => ({}))) as {
-          job?: {
-            status?: string;
-            templateId?: string;
-            error?: string;
-          };
-          error?: string;
-          message?: string;
-        };
-        if (!jr.ok) {
-          throw new Error(jd.message || jd.error || `查询失败（${jr.status}）`);
-        }
-        const st = String(jd.job?.status || "");
-        if (st === "succeeded") {
-          newId = String(jd.job?.templateId || "").trim();
-          break;
-        }
-        if (st === "failed" || st === "cancelled") {
-          throw new Error(jd.job?.error || `生成${st === "cancelled" ? "已取消" : "失败"}`);
-        }
-        toast.loading(`正在生成…（${i + 1}）`, { id: toastId });
-      }
-      if (!newId) throw new Error("生成超时，请稍后在编辑器重试");
-
-      const docRes = await fetch(
-        `/api/html-templates/${encodeURIComponent(newId)}`,
-      );
-      const doc = await docRes.json().catch(() => ({}));
-      if (!docRes.ok) {
-        throw new Error(
-          (doc as { message?: string; error?: string }).message ||
-            (doc as { error?: string }).error ||
-            `加载结果失败（${docRes.status}）`,
-        );
-      }
       sessionStorage.setItem(
-        "webppt:pending-template-doc",
-        JSON.stringify(doc),
+        "webppt:pending-remix-job",
+        JSON.stringify({
+          jobId,
+          sourceTemplateId: tid,
+          prompt: brief,
+        }),
       );
-      toast.success("生成完成，正在打开编辑器", { id: toastId });
-      router.push("/editor");
+      toast.success("已开始生成，正在打开编辑器", { id: toastId });
+      router.push("/edit");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "生成失败", {
         id: toastId,
@@ -1129,7 +1291,7 @@ export default function GalleryHome() {
 
       <div
         data-dock
-        className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-col items-center px-3 pb-4 pt-16 sm:pb-5"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-col items-center px-3 pb-6 pt-16 sm:pb-8"
         style={{
           background:
             "linear-gradient(to top, rgba(12,11,10,0.92) 0%, rgba(12,11,10,0.55) 45%, transparent 100%)",
@@ -1255,6 +1417,137 @@ export default function GalleryHome() {
               );
             })}
           </div>
+
+          {(llmProviders.length > 0 || imageProviders.length > 0) && (
+            <div className="flex flex-nowrap items-center gap-2 overflow-x-auto rounded-2xl border border-white/10 bg-[#1a1917]/88 px-3 py-2 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-md [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <span className="shrink-0 text-[11px] font-medium tracking-wide text-white/40">
+                文本
+              </span>
+              <Select
+                value={llmProvider}
+                onValueChange={onLlmProviderChange}
+                open={openModelSelect === "llmProvider"}
+                onOpenChange={(open) =>
+                  onModelSelectOpenChange("llmProvider", open)
+                }
+                disabled={generating || inspiring || llmProviders.length === 0}
+              >
+                <SelectTrigger
+                  aria-label="文本模型服务商"
+                  className={dockSelectTriggerClass}
+                >
+                  <SelectValue placeholder="服务商" />
+                </SelectTrigger>
+                <SelectContent className={dockSelectContentClass}>
+                  {llmProviders.map((p) => (
+                    <SelectItem
+                      key={p.id}
+                      value={p.id}
+                      disabled={!p.configured}
+                      className={dockSelectItemClass}
+                    >
+                      {p.configured ? p.label : `${p.label}（未配置）`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={llmModel}
+                onValueChange={setLlmModel}
+                open={openModelSelect === "llmModel"}
+                onOpenChange={(open) =>
+                  onModelSelectOpenChange("llmModel", open)
+                }
+                disabled={generating || inspiring || llmModelOptions.length === 0}
+              >
+                <SelectTrigger
+                  aria-label="文本模型"
+                  className={cn(dockSelectTriggerClass, "max-w-[13rem]")}
+                >
+                  <SelectValue placeholder="模型" />
+                </SelectTrigger>
+                <SelectContent className={dockSelectContentClass}>
+                  {llmModelOptions.map((m) => (
+                    <SelectItem
+                      key={m.id}
+                      value={m.id}
+                      className={dockSelectItemClass}
+                    >
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <span
+                className="mx-0.5 h-3 w-px shrink-0 bg-white/15"
+                aria-hidden
+              />
+
+              <span className="shrink-0 text-[11px] font-medium tracking-wide text-white/40">
+                图片
+              </span>
+              <Select
+                value={imageProvider}
+                onValueChange={onImageProviderChange}
+                open={openModelSelect === "imageProvider"}
+                onOpenChange={(open) =>
+                  onModelSelectOpenChange("imageProvider", open)
+                }
+                disabled={
+                  generating || inspiring || imageProviders.length === 0
+                }
+              >
+                <SelectTrigger
+                  aria-label="图片模型服务商"
+                  className={dockSelectTriggerClass}
+                >
+                  <SelectValue placeholder="服务商" />
+                </SelectTrigger>
+                <SelectContent className={dockSelectContentClass}>
+                  {imageProviders.map((p) => (
+                    <SelectItem
+                      key={p.id}
+                      value={p.id}
+                      disabled={!p.configured}
+                      className={dockSelectItemClass}
+                    >
+                      {p.configured ? p.label : `${p.label}（未配置）`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={imageModel}
+                onValueChange={setImageModel}
+                open={openModelSelect === "imageModel"}
+                onOpenChange={(open) =>
+                  onModelSelectOpenChange("imageModel", open)
+                }
+                disabled={
+                  generating || inspiring || imageModelOptions.length === 0
+                }
+              >
+                <SelectTrigger
+                  aria-label="图片模型"
+                  className={cn(dockSelectTriggerClass, "max-w-[13rem]")}
+                >
+                  <SelectValue placeholder="模型" />
+                </SelectTrigger>
+                <SelectContent className={dockSelectContentClass}>
+                  {imageModelOptions.map((m) => (
+                    <SelectItem
+                      key={m.id}
+                      value={m.id}
+                      className={dockSelectItemClass}
+                    >
+                      {m.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
       </div>
 

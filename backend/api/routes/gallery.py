@@ -31,6 +31,14 @@ def get_categories():
     return {"categories": catalog()}
 
 
+@router.get("/api/gallery/models")
+def get_gallery_models():
+    """首页文本/图片模型目录（公开，不含 key 指纹）。"""
+    from admin.providers import list_gallery_model_catalog
+
+    return list_gallery_model_catalog()
+
+
 @router.post("/api/gallery/inspire")
 async def post_inspire(request: Request):
     """首页「发现灵感」：LLM 生成一段 PPT 创作要求（与所选模板无关）。"""
@@ -82,16 +90,50 @@ async def post_gallery_remix(request: Request):
             message="该模板缺少设计规范，暂时无法套用",
         )
 
+    # 默认替换图片（与后台「使用模板 + 重生图」一致）；显式 skipImage:true 可关
+    skip_image = body.get("skipImage") is True
+    # 首页套用：body 可指定模型；未传时用公开目录默认（优先已配置的 Groq / Gemini）
+    from admin.providers import list_gallery_model_catalog
+
+    catalog = list_gallery_model_catalog()
+    defaults = catalog.get("defaults") or {}
+    llm_provider = (
+        str(body.get("llmProvider") or defaults.get("llmProvider") or "gemini").strip()
+        or "gemini"
+    )
+    llm_model = (
+        str(body.get("llmModel") or defaults.get("llmModel") or "gemini-3.8-flash").strip()
+        or "gemini-3.8-flash"
+    )
+    image_provider = (
+        str(
+            body.get("imageProvider")
+            or defaults.get("imageProvider")
+            or "siliconflow"
+        ).strip()
+        or "siliconflow"
+    )
+    image_model = (
+        str(
+            body.get("imageModel")
+            or defaults.get("imageModel")
+            or "Kwai-Kolors/Kolors"
+        ).strip()
+        or "Kwai-Kolors/Kolors"
+    )
     try:
         job = start_remix_job(
             {
                 "sourceTemplateId": tid,
                 "prompt": prompt,
-                # 首页默认保留原图，更快更稳
-                "skipImage": body.get("skipImage") is not False,
+                "skipImage": skip_image,
                 "mock": bool(body.get("mock")),
                 "status": "approved",
                 "gallery": True,
+                "llmProvider": llm_provider,
+                "llmModel": llm_model,
+                "imageProvider": image_provider,
+                "imageModel": image_model,
             }
         )
         return JSONResponse(
@@ -111,7 +153,7 @@ async def post_gallery_remix(request: Request):
 
 @router.get("/api/gallery/jobs/{job_id}")
 def get_gallery_job(job_id: str):
-    """首页轮询套用进度（精简字段，不含 Admin 日志）。"""
+    """首页/编辑器轮询套用进度（精简字段，不含 Admin 日志）。"""
     from admin.jobs import refresh_job_from_disk
 
     jid = str(job_id or "").strip()
@@ -128,12 +170,16 @@ def get_gallery_job(job_id: str):
         tid = str(ids[0] or "") or None
     if not tid:
         tid = str(job.get("templateId") or "") or None
+    pages_ready = job.get("pagesReady") if isinstance(job.get("pagesReady"), list) else []
     return {
         "job": {
             "id": job.get("id"),
             "status": job.get("status"),
             "sourceTemplateId": job.get("sourceTemplateId"),
             "templateId": tid,
+            "pagesReady": pages_ready,
+            "pageTotal": job.get("pageTotal")
+            or (job.get("progress") or {}).get("total"),
             "progress": job.get("progress"),
             "error": job.get("error"),
         }

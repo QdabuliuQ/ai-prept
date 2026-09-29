@@ -1,76 +1,65 @@
-import { Select, type SelectProps } from "antd";
-import { type FC, useEffect, useRef, useState } from "react";
-import styles from "./index.module.less";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { type CSSProperties, type FC } from "react";
 
-type TriggerType = "click" | "hover";
+export interface PanelSelectOption {
+  value: string;
+  label: string;
+}
 
-interface IPanelSelectProps extends Omit<SelectProps, "open" | "onOpenChange"> {
-  /** 触发方式 */
-  trigger?: TriggerType;
-  /** 悬停延时关闭时间（毫秒） */
+interface IPanelSelectProps {
+  value?: string;
+  options?: PanelSelectOption[];
+  onChange?: (value: string) => void;
+  className?: string;
+  style?: CSSProperties;
+  disabled?: boolean;
+  /** @deprecated kept for call-site compat; shadcn Select is click-triggered */
+  trigger?: "click" | "hover";
   hoverDelay?: number;
+  size?: "small" | "middle" | "large";
 }
 
 export const PanelSelect: FC<IPanelSelectProps> = ({
-  trigger = "hover",
-  hoverDelay = 150,
+  value,
+  options = [],
+  onChange,
   className,
-  variant = "outlined",
-  ...selectProps
+  style,
+  disabled,
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const timerRef = useRef<NodeJS.Timeout | undefined>(undefined);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    setIsOpen(false);
-  }, [selectProps.value]);
-
-  const handleMouseEnter = () => {
-    if (trigger === "hover") {
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
-      setIsOpen(true);
-    }
-  };
-
-  const handleMouseLeave = () => {
-    if (trigger === "hover") {
-      timerRef.current = setTimeout(() => {
-        setIsOpen(false);
-      }, hoverDelay);
-    }
-  };
-
-  const handleOpenChange = (open: boolean) => {
-    if (timerRef.current) {
-      clearTimeout(timerRef.current);
-    }
-    setIsOpen(open);
-  };
-
-  const wrapperProps =
-    trigger === "hover"
-      ? { onMouseEnter: handleMouseEnter, onMouseLeave: handleMouseLeave }
-      : {};
-
   return (
-    <div {...wrapperProps} style={{ display: "inline-block", lineHeight: 1 }}>
-      <Select
-        {...selectProps}
-        variant={variant}
-        className={[styles.panelSelect, className].filter(Boolean).join(" ")}
-        open={isOpen}
-        onOpenChange={handleOpenChange}
-      />
-    </div>
+    <Select
+      value={value}
+      onValueChange={(next) => onChange?.(next)}
+      disabled={disabled}
+    >
+      <SelectTrigger
+        className={cn(
+          "h-6 min-h-6 gap-1 border-[var(--border-default)] bg-[var(--input-bg)] px-2 text-[12px] shadow-none focus:ring-1 focus:ring-[var(--primary-color)]",
+          className,
+        )}
+        style={style}
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent className="min-w-[var(--radix-select-trigger-width)] text-[12px]">
+        {options.map((opt) => (
+          <SelectItem
+            key={opt.value}
+            value={opt.value}
+            className="text-[12px]"
+          >
+            {opt.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 };

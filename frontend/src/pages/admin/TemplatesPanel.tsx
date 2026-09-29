@@ -65,6 +65,7 @@ import {
   templateStatusBadge,
   templateRenderBadge,
   TokenWithCost,
+  toneBadge,
   useConfirmDialog,
 } from "./shared";
 import type { TemplateStatus, TemplateSummary } from "./types";
@@ -487,7 +488,7 @@ export function TemplatesPanel({
         JSON.stringify(data),
       );
       toast.success("模板已加载，正在打开编辑器");
-      router.push("/editor");
+      router.push("/edit");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e));
     } finally {
@@ -635,7 +636,9 @@ export function TemplatesPanel({
         pages,
         assetBaseUrl: `/api/html-templates/${id}/assets`,
         onProgress: ({ current, total }) => {
-          toast.loading(`导出 PPTX ${current}/${total}…`, { id: key });
+          const percent =
+            total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+          toast.loading(`正在导出 PPTX ${percent}%`, { id: key });
         },
       });
       toast.success("PPTX 已下载（html-to-pptx）", { id: key });
@@ -886,12 +889,12 @@ export function TemplatesPanel({
             的会自动生成后再上传。
           </p>
           {needSpec.length > 0 ? (
-            <p className="mb-2 text-amber-700">
+            <p className="mb-2 text-amber-700 dark:text-amber-300">
               其中 {needSpec.length} 个将先自动生成 visual-spec.md
             </p>
           ) : null}
           {skipped.length > 0 ? (
-            <p className="mb-2 text-amber-700">
+            <p className="mb-2 text-amber-700 dark:text-amber-300">
               将跳过 {skipped.length} 个（未通过）
             </p>
           ) : null}
@@ -1135,7 +1138,7 @@ export function TemplatesPanel({
         </span>
       </div>
 
-      <div className="rounded-lg border bg-white">
+      <div className="rounded-lg border border-border bg-card">
         <div className="overflow-x-auto">
           <Table className="min-w-[1480px] table-fixed">
             <TableHeader>
@@ -1238,7 +1241,8 @@ export function TemplatesPanel({
                     <TableRow
                       key={row.id}
                       className={cn(
-                        highlightId === row.id && "bg-orange-50/80",
+                        highlightId === row.id &&
+                          "bg-orange-50/80 dark:bg-orange-950/50",
                       )}
                     >
                       <TableCell>
@@ -1257,7 +1261,7 @@ export function TemplatesPanel({
                             className={cn(
                               "truncate font-medium",
                               highlightId === row.id &&
-                                "rounded bg-orange-100/80 px-1",
+                                "rounded bg-orange-100/80 px-1 dark:bg-orange-900/50",
                             )}
                           >
                             {row.label?.zh_CN || row.id}
@@ -1361,7 +1365,7 @@ export function TemplatesPanel({
                           }
                           className={
                             row.storageBackend === "qiniu"
-                              ? "border-transparent bg-sky-100 text-sky-800 hover:bg-sky-100"
+                              ? toneBadge.sky
                               : undefined
                           }
                         >
@@ -1563,7 +1567,7 @@ export function TemplatesPanel({
               <div className="space-y-1">
                 {preview.htmlConvertFailed ||
                 preview.render === "svg-fallback" ? (
-                  <p className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs text-rose-900">
+                  <p className="rounded-md border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs text-rose-900 dark:border-rose-800 dark:bg-rose-950/50 dark:text-rose-200">
                     未转成标准 HTML：当前为 SVG
                     兜底预览包（svg_to_pptx/转包失败），仅供人工查看，不是可编辑
                     html-slide。
@@ -1581,7 +1585,7 @@ export function TemplatesPanel({
               </div>
             ) : null}
           </DialogHeader>
-          <div className="bg-[#f4f4f2] px-6 py-5">
+          <div className="bg-muted px-6 py-5">
             {embedSrc && page ? (
               <div className="flex flex-col items-center gap-4">
                 <AdminSlideFrame
@@ -1600,7 +1604,7 @@ export function TemplatesPanel({
                         "h-8 min-w-8 rounded px-2 text-xs",
                         i === pageIndex
                           ? "bg-primary text-primary-foreground"
-                          : "bg-black/5 text-foreground/70 hover:bg-black/10",
+                          : "bg-foreground/5 text-foreground/70 hover:bg-foreground/10",
                         rewriting && "opacity-50",
                       )}
                     >

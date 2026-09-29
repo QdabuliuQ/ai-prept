@@ -224,6 +224,21 @@ export class SlideEditorParentBridge {
     this.notifyCommand("SET_ELEMENT_TRANSFORM", { selector, editorId, box });
   }
 
+  applyTextStyle(patch: {
+    bold?: boolean | "toggle";
+    italic?: boolean | "toggle";
+    underline?: boolean | "toggle";
+    strike?: boolean | "toggle";
+    textAlign?: "left" | "center" | "right";
+    color?: string;
+    fontSize?: number | "increase" | "decrease";
+  }, target?: { selector?: string; editorId?: string }) {
+    return this.request<{ success: boolean; applied: number; html?: string }>(
+      "APPLY_TEXT_STYLE",
+      { ...patch, ...target },
+    );
+  }
+
   refreshSelection() {
     return this.request("REFRESH_SELECTION");
   }

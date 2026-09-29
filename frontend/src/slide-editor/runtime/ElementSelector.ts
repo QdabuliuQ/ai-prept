@@ -6,6 +6,7 @@
 import type { EditorBridge } from "./core/EditorBridge";
 import {
   ensureEditorId,
+  findElement,
   getElementSelector,
   isInjectedElement,
   rememberEditorElement,
@@ -13,7 +14,12 @@ import {
   type EditableElement,
 } from "./utils/dom";
 import { normalizeColor, normalizeTextAlign } from "./utils/css";
-import { isSlideShellElement, getUnrotatedViewportBox } from "./utils/transform";
+import {
+	isSlideShellElement,
+	getUnrotatedViewportBox,
+	releaseAncestorOverflow,
+	releaseAllTextSlotOverflow,
+} from "./utils/transform";
 
 const TEXT_EDITING_STYLE_ID = "magic-editor-text-editing-style"
 
@@ -52,6 +58,8 @@ export class ElementSelector {
 		this.injectStyles()
 		this.bindEvents()
 		this.bindScrollListener()
+		// 父级 overflow:hidden 会裁切字形；原先只在拖拽时 release，导致「拖一下才显示全」
+		releaseAllTextSlotOverflow()
 	}
 
 	/**
@@ -144,6 +152,309 @@ export class ElementSelector {
 	}
 
 	/**
+	 * Apply text formatting to currently selected text element(s).
+	 * Prefer an explicit parent target (selector/editorId) so formatting still
+	 * works if iframe selection was lost; write onto the real text leaf so
+	 * stylesheet rules on nested spans don't swallow the change.
+	 */
+	applyTextStyle(
+		patch: {
+			bold?: boolean | "toggle"
+			italic?: boolean | "toggle"
+			underline?: boolean | "toggle"
+			strike?: boolean | "toggle"
+			textAlign?: "left" | "center" | "right"
+			color?: string
+			fontSize?: number | "increase" | "decrease"
+		},
+		target?: { selector?: string; editorId?: string },
+	): { success: boolean; applied: number } {
+		const elements = new Set<HTMLElement>()
+
+		if (target?.editorId || target?.selector) {
+			const el = findElement(target.selector, target.editorId)
+			if (el instanceof HTMLElement) elements.add(el)
+		}
+		for (const el of Array.from(this.selectedElements)) {
+			if (el instanceof HTMLElement) elements.add(el)
+		}
+
+		let applied = 0
+		for (const element of elements) {
+			if (!this.canFormatElement(element)) continue
+			this.writeTextStyle(element, patch)
+			// Keep selection bookkeeping in sync when parent retargeted by id
+			if (!this.selectedElements.has(element)) {
+				ensureEditorId(element)
+				rememberEditorElement(element)
+				this.selectedElements.add(element)
+			}
+			applied += 1
+		}
+
+		if (applied > 0) {
+			this.notifySelectionChanged()
+		}
+		return { success: applied > 0, applied }
+	}
+
+	private canFormatElement(element: HTMLElement): boolean {
+		if (this.isTextElement(element)) return true
+		const slotType = (element.getAttribute("data-slot-type") || "").toLowerCase()
+		const dataElement = (
+			element.getAttribute("data-element") || ""
+		).toLowerCase()
+		if (
+			slotType === "image" ||
+			slotType === "chart" ||
+			dataElement === "image" ||
+			dataElement === "shape" ||
+			dataElement === "chart"
+		) {
+			return false
+		}
+		return (element.textContent?.trim() || "").length > 0
+	}
+
+	private writeTextStyle(
+		element: HTMLElement,
+		patch: {
+			bold?: boolean | "toggle"
+			italic?: boolean | "toggle"
+			underline?: boolean | "toggle"
+			strike?: boolean | "toggle"
+			textAlign?: "left" | "center" | "right"
+			color?: string
+			fontSize?: number | "increase" | "decrease"
+		},
+	): void {
+		const styleSource = this.resolveTextStyleSource(element)
+		const style = window.getComputedStyle(styleSource)
+		const writeTargets = this.collectTextWriteTargets(element)
+
+		if (patch.bold !== undefined) {
+			const usedExec =
+				patch.bold === "toggle" &&
+				this.tryExecOnElementSelection(element, "bold")
+			if (!usedExec) {
+				const isBold = this.isBoldWeight(style.fontWeight)
+				const next =
+					patch.bold === "toggle" ? !isBold : Boolean(patch.bold)
+				for (const el of writeTargets) {
+					el.style.setProperty("font-weight", next ? "700" : "400", "important")
+				}
+			}
+		}
+
+		if (patch.italic !== undefined) {
+			const usedExec =
+				patch.italic === "toggle" &&
+				this.tryExecOnElementSelection(element, "italic")
+			if (!usedExec) {
+				const isItalic =
+					style.fontStyle === "italic" || style.fontStyle === "oblique"
+				const next =
+					patch.italic === "toggle" ? !isItalic : Boolean(patch.italic)
+				for (const el of writeTargets) {
+					el.style.setProperty(
+						"font-style",
+						next ? "italic" : "normal",
+						"important",
+					)
+				}
+			}
+		}
+
+		if (patch.underline !== undefined) {
+			const usedExec =
+				patch.underline === "toggle" &&
+				this.tryExecOnElementSelection(element, "underline")
+			if (!usedExec) {
+				const has = this.hasTextDecoration(style, "underline")
+				const next =
+					patch.underline === "toggle" ? !has : Boolean(patch.underline)
+				for (const el of writeTargets) {
+					this.setTextDecoration(el, "underline", next)
+				}
+			}
+		}
+
+		if (patch.strike !== undefined) {
+			const usedExec =
+				patch.strike === "toggle" &&
+				this.tryExecOnElementSelection(element, "strikeThrough")
+			if (!usedExec) {
+				const has = this.hasTextDecoration(style, "line-through")
+				const next =
+					patch.strike === "toggle" ? !has : Boolean(patch.strike)
+				for (const el of writeTargets) {
+					this.setTextDecoration(el, "line-through", next)
+				}
+			}
+		}
+
+		if (patch.textAlign) {
+			element.style.setProperty("text-align", patch.textAlign, "important")
+		}
+
+		if (typeof patch.color === "string" && patch.color.trim()) {
+			const color = patch.color.trim()
+			for (const el of writeTargets) {
+				el.style.setProperty("color", color, "important")
+			}
+		}
+
+		if (patch.fontSize !== undefined) {
+			const currentPx = this.parseFontSizePx(style.fontSize)
+			let nextPx = currentPx
+			if (patch.fontSize === "increase") {
+				nextPx = this.stepFontSize(currentPx, 1)
+			} else if (patch.fontSize === "decrease") {
+				nextPx = this.stepFontSize(currentPx, -1)
+			} else if (typeof patch.fontSize === "number" && Number.isFinite(patch.fontSize)) {
+				nextPx = Math.max(8, Math.min(400, Math.round(patch.fontSize)))
+			}
+			const value = `${nextPx}px`
+			for (const el of writeTargets) {
+				el.style.setProperty("font-size", value, "important")
+			}
+		}
+	}
+
+	private parseFontSizePx(fontSize: string): number {
+		const n = parseFloat(fontSize || "")
+		return Number.isFinite(n) && n > 0 ? n : 16
+	}
+
+	/** Snap along common presets when possible; otherwise ±2px. */
+	private stepFontSize(currentPx: number, direction: 1 | -1): number {
+		const presets = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96]
+		const rounded = Math.round(currentPx)
+		const idx = presets.findIndex((p) => p === rounded)
+		if (idx >= 0) {
+			const next = presets[idx + direction]
+			if (next != null) return next
+		}
+		if (direction > 0) {
+			const larger = presets.find((p) => p > rounded)
+			if (larger != null) return larger
+		} else {
+			for (let i = presets.length - 1; i >= 0; i -= 1) {
+				if (presets[i] < rounded) return presets[i]
+			}
+		}
+		return Math.max(8, Math.min(400, rounded + direction * 2))
+	}
+
+	private collectTextWriteTargets(element: HTMLElement): HTMLElement[] {
+		const targets = new Set<HTMLElement>([
+			element,
+			this.resolveTextStyleSource(element),
+		])
+		element
+			.querySelectorAll<HTMLElement>(
+				"span,a,strong,em,b,i,u,s,small,mark,del,ins,sub,sup,code,font,p,h1,h2,h3,h4,h5,h6",
+			)
+			.forEach((el) => {
+				if ((el.textContent?.trim() || "").length > 0) targets.add(el)
+			})
+		return Array.from(targets)
+	}
+
+	private isBoldWeight(fontWeight: string): boolean {
+		const w = (fontWeight || "").trim().toLowerCase()
+		if (w === "bold" || w === "bolder") return true
+		const n = parseInt(w, 10)
+		return !Number.isNaN(n) && n >= 600
+	}
+
+	/** Deepest single-path phrasing leaf — where template typography often lives. */
+	private resolveTextStyleSource(element: HTMLElement): HTMLElement {
+		const phrasing = new Set([
+			"span",
+			"a",
+			"strong",
+			"em",
+			"b",
+			"i",
+			"u",
+			"s",
+			"small",
+			"mark",
+			"del",
+			"ins",
+			"sub",
+			"sup",
+			"code",
+			"font",
+		])
+		let node: HTMLElement = element
+		for (let i = 0; i < 8; i += 1) {
+			const kids = Array.from(node.children).filter((c) => {
+				const t = c.tagName.toLowerCase()
+				return t !== "br" && t !== "wbr"
+			}) as HTMLElement[]
+			if (kids.length !== 1) break
+			const only = kids[0]
+			if (!phrasing.has(only.tagName.toLowerCase())) break
+			if (!(only.textContent?.trim() || "")) break
+			node = only
+		}
+		return node
+	}
+
+	private hasTextDecoration(
+		style: CSSStyleDeclaration,
+		token: string,
+	): boolean {
+		const line = `${style.textDecorationLine || ""} ${style.textDecoration || ""}`
+		return line.split(/\s+/).includes(token)
+	}
+
+	private setTextDecoration(
+		element: HTMLElement,
+		token: "underline" | "line-through",
+		enabled: boolean,
+	) {
+		const style = window.getComputedStyle(element)
+		const tokens = new Set(
+			`${style.textDecorationLine || style.textDecoration || ""}`
+				.split(/\s+/)
+				.filter((t) => t && t !== "none"),
+		)
+		if (enabled) tokens.add(token)
+		else tokens.delete(token)
+		element.style.setProperty(
+			"text-decoration-line",
+			tokens.size ? Array.from(tokens).join(" ") : "none",
+			"important",
+		)
+	}
+
+	/** Returns true if execCommand ran on a non-collapsed range inside element. */
+	private tryExecOnElementSelection(
+		element: HTMLElement,
+		command: string,
+	): boolean {
+		if (!element.isContentEditable) return false
+		const selection = window.getSelection()
+		if (
+			!selection ||
+			selection.isCollapsed ||
+			!selection.toString().trim() ||
+			!selection.anchorNode ||
+			!element.contains(selection.anchorNode)
+		) {
+			return false
+		}
+		try {
+			return document.execCommand(command)
+		} catch {
+			return false
+		}
+	}
+
+	/**
 	 * Inject editor-only text editing rules without touching author inline styles.
 	 */
 	private injectStyles(): void {
@@ -157,6 +468,12 @@ export class ElementSelector {
 	-webkit-user-select: text !important;
 	user-select: text !important;
 	outline: none !important;
+}
+/* 文本槽勿用 overflow:hidden 裁切字形；拖拽时 releaseAncestorOverflow
+   才变 visible，会导致「拖一下才显示全」。图片槽仍保持 hidden 以配合 cover。 */
+[data-slot-type="text"],
+[data-slot-type="text"] * {
+	overflow: visible !important;
 }
 `
 		document.head.appendChild(style)
@@ -176,6 +493,7 @@ export class ElementSelector {
 			"lineHeight",
 			"textAlign",
 			"textDecoration",
+			"textDecorationLine",
 			"backgroundColor",
 			"backgroundImage",
 			"width",
@@ -236,6 +554,30 @@ export class ElementSelector {
 				styles[prop] = value
 			}
 		})
+
+		// Typography often lives on nested <span>/<strong> — sample that leaf
+		// so Edit panel active states match what the user sees.
+		if (
+			element instanceof HTMLElement &&
+			this.isTextElement(element)
+		) {
+			const source = this.resolveTextStyleSource(element)
+			if (source !== element) {
+				const leaf = window.getComputedStyle(source)
+				styles.color = normalizeColor(leaf.color)
+				styles.fontSize = leaf.fontSize
+				styles.fontWeight = leaf.fontWeight
+				styles.fontFamily = leaf.fontFamily
+				styles.fontStyle = leaf.fontStyle
+				styles.lineHeight = leaf.lineHeight
+				styles.textDecoration = leaf.textDecoration
+				styles.textDecorationLine = leaf.textDecorationLine
+				// text-align is usually on the block container
+				styles.textAlign = normalizeTextAlign(
+					computed.textAlign || leaf.textAlign,
+				)
+			}
+		}
 
 		const parent = element.parentElement
 		if (parent) {
@@ -473,25 +815,68 @@ export class ElementSelector {
 	}
 
 	/**
-	 * Text leaf only: the innermost tag that actually wraps text.
-	 * e.g. `<div><span>text</span></div>` → span yes, outer div no.
-	 * `<div>plain</div>` (no element children) → div yes.
+	 * Text leaf or text slot/container.
+	 * e.g. `<span>text</span>`, `<div>plain</div>`,
+	 * `<div data-slot-type="text"><span>…</span></div>`,
+	 * `<div class="title"><span>标题</span></div>` (phrasing-only kids).
 	 */
 	private isTextElement(element: EditableElement): boolean {
 		if (!(element instanceof HTMLElement)) return false
 
 		const tagName = element.tagName.toLowerCase()
+		const slotType = (element.getAttribute("data-slot-type") || "").toLowerCase()
+		const dataElement = (
+			element.getAttribute("data-element") || ""
+		).toLowerCase()
+
+		// Non-text roles
+		if (
+			slotType === "image" ||
+			slotType === "chart" ||
+			dataElement === "image" ||
+			dataElement === "shape" ||
+			dataElement === "chart"
+		) {
+			return false
+		}
+
+		const hasText = (element.textContent?.trim() || "").length > 0
+
+		// Explicit text slots / roles — allow nested phrasing markup
+		if (slotType === "text" || dataElement === "text") {
+			return hasText
+		}
+
+		const phrasingTags = new Set([
+			"span",
+			"a",
+			"strong",
+			"em",
+			"b",
+			"i",
+			"u",
+			"s",
+			"small",
+			"mark",
+			"del",
+			"ins",
+			"sub",
+			"sup",
+			"br",
+			"wbr",
+			"code",
+			"font",
+		])
 
 		const textTags = new Set([
+			...phrasingTags,
 			"p",
-			"span",
 			"h1",
 			"h2",
 			"h3",
 			"h4",
 			"h5",
 			"h6",
-			"a",
 			"li",
 			"td",
 			"th",
@@ -499,17 +884,6 @@ export class ElementSelector {
 			"button",
 			"blockquote",
 			"pre",
-			"code",
-			"strong",
-			"em",
-			"b",
-			"i",
-			"small",
-			"mark",
-			"del",
-			"ins",
-			"sub",
-			"sup",
 		])
 
 		const allowTag = textTags.has(tagName) || tagName === "div"
@@ -520,14 +894,20 @@ export class ElementSelector {
 			return t !== "br" && t !== "wbr"
 		})
 
-		// Wrapper with only element children (div>span): not the text leaf
+		// Wrapper with element children
 		if (structuralKids.length > 0) {
+			const onlyPhrasing = structuralKids.every((c) =>
+				phrasingTags.has(c.tagName.toLowerCase()),
+			)
+			// Text block / title shell that only wraps spans/em/… (common in templates)
+			if (onlyPhrasing && hasText) return true
+
 			const hasDirectText = Array.from(element.childNodes).some(
 				(n) =>
 					n.nodeType === Node.TEXT_NODE &&
 					(n.textContent?.trim() || "").length > 0,
 			)
-			// Layout div that nests other nodes is never a text leaf
+			// Layout div that nests block/structure nodes is never a text leaf
 			if (tagName === "div") return false
 			// Inline text tags may mix own text + nested emphasis: <span>a<em>b</em></span>
 			if (!hasDirectText) return false
@@ -535,7 +915,7 @@ export class ElementSelector {
 		}
 
 		// True leaf: only text / br inside
-		return (element.textContent?.trim() || "").length > 0
+		return hasText
 	}
 
 	/**
@@ -600,6 +980,9 @@ export class ElementSelector {
 
 		// Preserve the existing first-selection editing state while CSS provides visual feedback.
 		const isText = this.isTextElement(element)
+		if (element instanceof HTMLElement && isText) {
+			releaseAncestorOverflow(element)
+		}
 		if (
 			!multiSelect &&
 			isText &&
@@ -834,6 +1217,7 @@ export class ElementSelector {
 	enable() {
 		console.log("[ElementSelector] Enabling selection mode")
 		this.enabled = true
+		releaseAllTextSlotOverflow()
 	}
 
 	disable() {

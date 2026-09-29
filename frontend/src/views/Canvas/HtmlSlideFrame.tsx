@@ -15,7 +15,11 @@ import {
   type SlideRect,
 } from "@/slide-editor/parent/SlideEditorParentBridge";
 import { SelectionOverlay } from "@/views/Canvas/SelectionOverlay";
-import { usePPTStore } from "@/store";
+import {
+  useMenuActiveStore,
+  usePPTStore,
+  useSlideSelectionStore,
+} from "@/store";
 import type { Page } from "@/store/ppt";
 import {
   type CSSProperties,
@@ -70,6 +74,10 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     [],
   );
   const setPageHtml = usePPTStore((s) => s.setPageHtml);
+  const setSlideSelected = useSlideSelectionStore((s) => s.setSelected);
+  const clearSlideSelection = useSlideSelectionStore((s) => s.clearSelection);
+  const bindTextApi = useSlideSelectionStore((s) => s.bindTextApi);
+  const setActiveMenu = useMenuActiveStore((s) => s.setActiveMenu);
   const useDesign = fit === "design";
   const scale = useDesign ? 1 : SLIDE_HTML_SCALE;
   const transformingRef = useRef(false);
@@ -102,6 +110,8 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     setMultiSelected([]);
     setEditorReady(false);
     transformingRef.current = false;
+    // Only the editor canvas owns the shared selection store.
+    if (editable) clearSlideSelection();
 
     return () => {
       releaseSlideEmbedAccess(page.id);
@@ -146,6 +156,8 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
       bridgeRef.current?.destroy();
       bridgeRef.current = null;
       setEditorReady(false);
+      // Previews share the global selection store with the editor canvas —
+      // never clear selection / text API from a non-editable mount.
       return;
     }
 
@@ -158,11 +170,17 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
       onSelect: (info) => {
         if (transformingRef.current) return;
         setSelected(info);
-        if (info) setMultiSelected([]);
+        setSlideSelected(info);
+        if (info) {
+          setMultiSelected([]);
+          setActiveMenu("edit");
+        }
       },
       onMultiSelect: (els) => {
         if (transformingRef.current) return;
         setMultiSelected(els);
+        setSlideSelected(null);
+        if (els.length > 0) setActiveMenu("edit");
       },
       onContentChanged: (html) => {
         void persistHtml(html);
@@ -171,7 +189,22 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     bridgeRef.current = bridge;
     setEditorReady(false);
 
+    bindTextApi({
+      applyTextStyle: async (patch, target) => {
+        const result = await bridge.applyTextStyle(patch, target);
+        await bridge.refreshSelection().catch(() => undefined);
+        if (result?.html) {
+          await persistHtml(result.html);
+        } else if (result?.success) {
+          await persistHtml();
+        }
+      },
+    });
+
     return () => {
+      // Only the editable owner may tear down the shared text API / selection.
+      bindTextApi(null);
+      clearSlideSelection();
       bridge.destroy();
       if (bridgeRef.current === bridge) bridgeRef.current = null;
       setEditorReady(false);

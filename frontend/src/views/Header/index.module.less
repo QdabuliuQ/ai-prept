@@ -1,91 +1,452 @@
-.activeItem {
+.headerBar {
   position: relative;
-  font-weight: 600;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  margin: 10px 20px 0;
+  padding: 6px 12px;
+  gap: 0;
+  min-height: 44px;
+  border: 1px solid var(--panel-border);
+  border-radius: 14px;
+  /* 比通用 panel 更透，才能看出底层 mesh 的毛玻璃 */
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.28) 48%,
+    rgba(255, 250, 245, 0.34) 100%
+  );
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  box-shadow:
+    0 1px 2px rgba(60, 50, 40, 0.04),
+    0 10px 32px rgba(60, 50, 40, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  transform: translateZ(0);
+  overflow: hidden;
 
-  &::after {
-    position: absolute;
+  &::before {
     content: "";
-    left: 50%;
-    transform: translateX(-50%);
-    bottom: -7px;
-    width: 100%;
-    height: 2.5px;
-    background-color: var(--primary-color);
-    border-radius: 2px;
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: inherit;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.38) 0%,
+      rgba(255, 255, 255, 0) 42%
+    );
   }
 }
 
-.titleWrap {
-  flex: 1 1 0;
+:global(html.dark) .headerBar {
+  background: linear-gradient(
+    165deg,
+    rgba(48, 45, 42, 0.72) 0%,
+    rgba(36, 34, 32, 0.55) 100%
+  );
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.28),
+    0 10px 32px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+
+  &::before {
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.08) 0%,
+      rgba(255, 255, 255, 0) 45%
+    );
+  }
+}
+
+/* 与下方预览面板同宽，由 --preview-pane-width 同步（扣掉 header 左侧 padding） */
+.headerLeft {
+  width: calc(var(--preview-pane-width, 280px) - 12px);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding-right: 12px;
+  margin-right: 4px;
+  border-right: 1px solid var(--divider);
+}
+
+.brandLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  outline: none;
+  transition:
+    background-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+
+  &:hover {
+    background: var(--hover-bg);
+  }
+
+  &:focus-visible {
+    box-shadow: 0 0 0 2px rgba(242, 95, 0, 0.22);
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
+.brandLogo {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  object-fit: cover;
+  display: block;
+  box-shadow: 0 1px 2px rgba(60, 50, 40, 0.08);
+}
+
+.toolbar {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 12px;
+  padding-left: 8px;
+}
+
+.titleWrap {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   position: relative;
-  min-height: 22px;
-  font-size: 12px;
-  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  height: 30px;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  box-sizing: border-box;
+  padding: 0 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.4);
+    border-color: rgba(255, 255, 255, 0.55);
+  }
+
+  &:focus-within {
+    border-color: var(--primary-color);
+    background: var(--input-bg);
+    box-shadow: 0 0 0 2px rgba(242, 95, 0, 0.12);
+  }
+}
+
+:global(html.dark) .titleWrap {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.09);
+    border-color: rgba(255, 255, 255, 0.14);
+  }
+
+  &:focus-within {
+    background: var(--input-bg);
+  }
 }
 
 .input {
   box-sizing: border-box;
   width: 100%;
   max-width: 100%;
-  height: 22px;
+  height: 24px;
   border: 1px solid transparent;
-  border-radius: 4px;
-  padding-left: 6px;
-  padding-right: 6px;
+  border-radius: 6px;
+  padding: 0 8px;
   outline: none;
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--input-bg);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  background: transparent;
+  caret-color: var(--primary-color);
 
   &:focus {
-    border-color: var(--primary-color);
-    box-shadow: 0 0 0 2px rgba(242, 95, 0, 0.12);
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
   }
 }
 
 .titleText {
   box-sizing: border-box;
-  border-radius: 4px;
-  padding: 2px 6px;
-  margin-left: 0;
-  line-height: 18px;
-  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 0 8px;
+  margin: 0;
+  line-height: 24px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
 
-  &:hover {
-    background-color: var(--hover-bg);
+.exportGroup {
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 4px;
+
+  button,
+  a {
+    height: 30px;
+    min-width: auto;
+    padding: 0 11px;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    line-height: 1;
+    text-decoration: none;
+    background: rgba(255, 255, 255, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease,
+      box-shadow 0.15s ease;
+
+    &:hover:not(:disabled) {
+      background-color: rgba(255, 255, 255, 0.42) !important;
+      color: var(--primary-color);
+      border-color: rgba(242, 95, 0, 0.28);
+    }
+
+    &:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(242, 95, 0, 0.18);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+    }
   }
 }
 
-.exportBtn {
-  :global(.ant-btn) {
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    border-radius: 6px;
+:global(html.dark) .exportGroup button,
+:global(html.dark) .exportGroup a {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+
+  &:hover:not(:disabled) {
+    background-color: rgba(255, 255, 255, 0.1) !important;
+    border-color: rgba(242, 95, 0, 0.35);
+  }
+}
+
+.exportTrigger {
+  gap: 5px;
+}
+
+.navTrack {
+  justify-self: center;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  padding: 3px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  user-select: none;
+}
+
+:global(html.dark) .navTrack {
+  background: rgba(0, 0, 0, 0.22);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.navItem {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 52px;
+  height: 24px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 0.16s ease,
+    background-color 0.16s ease,
+    box-shadow 0.16s ease;
+
+  &:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.35);
+  }
+
+  &:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(242, 95, 0, 0.22);
+  }
+}
+
+.navIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  color: currentColor;
+}
+
+:global(html.dark) .navItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.activeItem {
+  color: var(--primary-color);
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow:
+    0 1px 2px rgba(60, 50, 40, 0.06),
+    inset 0 0 0 1px rgba(242, 95, 0, 0.16);
+
+  &:hover {
+    color: var(--primary-color);
+    background: rgba(255, 255, 255, 0.82);
+  }
+}
+
+:global(html.dark) .activeItem {
+  background: rgba(242, 95, 0, 0.2);
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.25),
+    inset 0 0 0 1px rgba(242, 95, 0, 0.3);
+
+  &:hover {
+    background: rgba(242, 95, 0, 0.26);
+  }
+}
+
+.utils {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+
+  button {
+    height: 30px;
+    min-width: 30px;
+    padding: 0 8px;
+    border-radius: 8px;
     color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease;
 
     &:hover:not(:disabled) {
       background-color: var(--hover-bg) !important;
       color: var(--primary-color);
     }
+
+    &:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(242, 95, 0, 0.18);
+    }
   }
 }
 
-.navItem {
-  position: relative;
-  padding: 2px 0;
-  letter-spacing: 0.02em;
+@media (max-width: 1100px) {
+  .toolbar {
+    column-gap: 8px;
+  }
+
+  .navItem {
+    min-width: 44px;
+    padding: 0 10px;
+  }
+
+  .exportGroup button {
+    padding: 0 9px;
+  }
 }
 
-/* 与下方预览面板同宽，由 --preview-pane-width 同步 */
-.headerLeft {
-  width: var(--preview-pane-width, 230px);
-  box-sizing: border-box;
+@media (max-width: 900px) {
+  .headerBar {
+    margin-left: 14px;
+    margin-right: 14px;
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+
+  .headerLeft {
+    width: auto;
+    max-width: 36vw;
+    border-right: none;
+    padding-right: 8px;
+    margin-right: 0;
+  }
+
+  .toolbar {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: 6px;
+    padding-left: 4px;
+  }
 }
 
-.headerBar {
-  position: relative;
-  z-index: 2;
+@media (prefers-reduced-motion: reduce) {
+  .brandLink,
+  .titleWrap,
+  .exportGroup button,
+  .navItem,
+  .utils button {
+    transition: none;
+  }
+
+  .brandLink:active {
+    transform: none;
+  }
 }

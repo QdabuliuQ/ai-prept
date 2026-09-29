@@ -6,6 +6,17 @@ import ThemePalettePanel, {
   THEME_PANEL_SECTION_KEY,
 } from "@/components/ThemePalettePanel";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  useDisplayStatusStore,
   useMenuActiveStore,
   usePPTStore,
   usePageActiveStore,
@@ -18,20 +29,21 @@ import {
 import {
   Add,
   ColorCard,
+  Column,
   Copy,
   Delete,
   PreviewCloseOne,
   PreviewOpen,
+  ViewGridCard,
 } from "@icon-park/react";
 import { useMemoizedFn } from "ahooks";
-import { Modal } from "antd";
-import type { FC } from "react";
+import { useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 
-/** 轻量化开始面板：页面管理 + 主题（无插入元素 / 背景编辑） */
+/** 页面面板：主题 / 画布管理 / 视图切换 */
 export const Start: FC = () => {
   const { t } = useTranslation();
-  const [modal, contextHolder] = Modal.useModal();
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const pageActive = usePageActiveStore((state) => state.pageActive);
   const pages = usePPTStore((state) => state.pages);
   const getActivePage = usePPTStore((state) => state.getActivePage);
@@ -39,8 +51,12 @@ export const Start: FC = () => {
   const togglePageVisible = usePPTStore((state) => state.togglePageVisible);
   const setPageActive = usePageActiveStore((state) => state.setPageActive);
   const setActiveMenu = useMenuActiveStore((state) => state.setActiveMenu);
+  const displayStatus = useDisplayStatusStore((state) => state.displayStatus);
+  const setDisplayStatus = useDisplayStatusStore(
+    (state) => state.setDisplayStatus,
+  );
   const toggleThemeSection = useChartInspectorStore(
-    (state) => state.toggleSection
+    (state) => state.toggleSection,
   );
 
   const currentPage = pageActive ? getActivePage(pageActive) : null;
@@ -57,22 +73,15 @@ export const Start: FC = () => {
     duplicatePageAndActivate(pageActive);
   });
 
-  const handleDeletePage = useMemoizedFn(() => {
+  const handleConfirmDelete = useMemoizedFn(() => {
     if (!pageActive || pages.length <= 1) return;
-    modal.confirm({
-      title: t("startPanel.confirmDeleteCanvas"),
-      okText: t("common.confirm"),
-      cancelText: t("common.cancel"),
-      okButtonProps: { danger: true },
-      onOk: () => {
-        const idx = pages.findIndex((p) => p.id === pageActive);
-        deletePage(pageActive);
-        const next = pages.filter((p) => p.id !== pageActive);
-        const nextActive =
-          next[Math.min(Math.max(idx, 0), next.length - 1)]?.id ?? null;
-        setPageActive(nextActive);
-      },
-    });
+    const idx = pages.findIndex((p) => p.id === pageActive);
+    deletePage(pageActive);
+    const next = pages.filter((p) => p.id !== pageActive);
+    const nextActive =
+      next[Math.min(Math.max(idx, 0), next.length - 1)]?.id ?? null;
+    setPageActive(nextActive);
+    setDeleteOpen(false);
   });
 
   const handleTogglePageVisible = useMemoizedFn(() => {
@@ -81,8 +90,7 @@ export const Start: FC = () => {
   });
 
   return (
-    <div className="flex items-center h-[53px] gap-[10px]">
-      {contextHolder}
+    <div className="flex h-[53px] items-center gap-[10px]">
       <ThemePalettePanel />
       <PanelLargeButton
         title={t("startPanel.theme")}
@@ -90,7 +98,7 @@ export const Start: FC = () => {
         onClick={() =>
           toggleThemeSection(
             THEME_PANEL_SECTION_KEY,
-            t("startPanel.themePanelTitle")
+            t("startPanel.themePanelTitle"),
           )
         }
       />
@@ -115,7 +123,11 @@ export const Start: FC = () => {
         }
         icon={
           isPageVisible ? (
-            <PreviewCloseOne theme="outline" size="18" fill="var(--icon-color)" />
+            <PreviewCloseOne
+              theme="outline"
+              size="18"
+              fill="var(--icon-color)"
+            />
           ) : (
             <PreviewOpen theme="outline" size="18" fill="var(--icon-color)" />
           )
@@ -126,9 +138,46 @@ export const Start: FC = () => {
       <PanelLargeButton
         title={t("startPanel.deleteCanvas")}
         icon={<Delete theme="outline" size="18" fill="var(--icon-color)" />}
-        onClick={handleDeletePage}
+        onClick={() => setDeleteOpen(true)}
         disabled={!pageActive || pages.length <= 1}
       />
+      <PanelSplitLine />
+      <PanelLargeButton
+        title={t("viewPanel.normalView")}
+        active={displayStatus === "default"}
+        icon={<Column theme="outline" size="18" fill="var(--icon-color)" />}
+        onClick={() => setDisplayStatus("default")}
+      />
+      <PanelLargeButton
+        title={t("viewPanel.slidePreview")}
+        active={displayStatus === "grid"}
+        icon={
+          <ViewGridCard theme="outline" size="18" fill="var(--icon-color)" />
+        }
+        onClick={() => setDisplayStatus("grid")}
+      />
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("startPanel.confirmDeleteCanvas")}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("startPanel.confirmDeleteCanvas")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={handleConfirmDelete}
+            >
+              {t("common.confirm")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

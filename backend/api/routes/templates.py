@@ -248,8 +248,9 @@ async def use_template(template_id: str, request: Request):
                 "prompt": prompt,
                 "skipImage": body.get("skipImage") is not False,
                 "mock": bool(body.get("mock")),
-                "llmProvider": body.get("llmProvider"),
-                "llmModel": body.get("llmModel"),
+                # 使用模板默认 Gemini 3.8；前端传 llmProvider/llmModel 可覆盖
+                "llmProvider": body.get("llmProvider") or "gemini",
+                "llmModel": body.get("llmModel") or "gemini-3.8-flash",
                 "imageProvider": body.get("imageProvider"),
                 "imageModel": body.get("imageModel"),
             }

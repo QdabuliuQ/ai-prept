@@ -38,6 +38,7 @@ import {
   LoadingButton,
   providerSelectLabel,
   SectionDivider,
+  toneBadge,
   useConfirmDialog,
 } from "./shared";
 import type {
@@ -436,9 +437,7 @@ export function GeneratePanel({
             转成模板包（默认不再起 Puppeteer）。写入{" "}
             <code className="rounded bg-muted px-1 text-xs">agent-output/</code>
             ，状态{" "}
-            <Badge className="border-transparent bg-amber-100 text-amber-900 hover:bg-amber-100">
-              待审批
-            </Badge>
+            <Badge className={toneBadge.amberStrong}>待审批</Badge>
             。任务日志里若出现「等待浏览器转换」，请保持本页打开直至转换完成。
           </span>
         </AlertDescription>
@@ -455,9 +454,7 @@ export function GeneratePanel({
               extra="入库 format=ppt-master；PPTX 由 Admin 浏览器转成 html-slide 包。"
             >
               <div className="flex flex-wrap items-center gap-2">
-                <Badge className="border-transparent bg-sky-100 text-sky-800 hover:bg-sky-100">
-                  ppt-master
-                </Badge>
+                <Badge className={toneBadge.sky}>ppt-master</Badge>
                 <Badge variant="secondary">SVG 线路</Badge>
                 <span className="text-sm text-muted-foreground">
                   规范 SVG → 质检 → 原生 PPTX → 转 HTML 包
@@ -857,9 +854,7 @@ export function GeneratePanel({
                   {lastJob.pipeline === "html-slide" ? (
                     <Badge variant="secondary">HTML Slide</Badge>
                   ) : (
-                    <Badge className="border-transparent bg-cyan-100 text-cyan-800 hover:bg-cyan-100">
-                      PPT Master
-                    </Badge>
+                    <Badge className={toneBadge.cyan}>PPT Master</Badge>
                   )}
                   {(lastJob.pipeline === "ppt-master" ||
                     lastJob.pipeline == null) && (
@@ -872,7 +867,7 @@ export function GeneratePanel({
                       className={
                         lastJob.pptMasterRender === "html"
                           ? undefined
-                          : "border-transparent bg-cyan-100 text-cyan-800 hover:bg-cyan-100"
+                          : toneBadge.cyan
                       }
                     >
                       {lastJob.pptMasterRender === "html"

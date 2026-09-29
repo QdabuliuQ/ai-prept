@@ -10,11 +10,10 @@ import { showPageContextMenu } from "@/utils/pageContextMenu";
 import {
   scheduleVisibleThumbnails,
   usePageThumbnail,
-  usePageThumbnailLoading,
 } from "@/utils/pageThumbnail";
 import { PreviewCloseOne } from "@icon-park/react";
 import { useMemoizedFn } from "ahooks";
-import { Spin } from "antd";
+import { SlideThumbSkeleton } from "@/components/SlideThumbSkeleton";
 import {
   memo,
   type FC,
@@ -30,7 +29,6 @@ const GridThumbCard: FC<{
   onContextMenu: (e: React.MouseEvent, pageId: string) => void;
 }> = memo(({ page, index, active, onClick, onContextMenu }) => {
   const thumbnailUrl = usePageThumbnail(page);
-  const isLoading = usePageThumbnailLoading(page);
 
   return (
     <div className="flex flex-col items-center cursor-pointer group">
@@ -52,12 +50,7 @@ const GridThumbCard: FC<{
             draggable={false}
           />
         ) : (
-          <div className="absolute inset-0 bg-[linear-gradient(90deg,var(--skeleton-from)_25%,var(--skeleton-mid)_37%,var(--skeleton-from)_63%)] bg-[length:400%_100%] animate-pulse" />
-        )}
-        {!thumbnailUrl && isLoading && (
-          <div className="absolute inset-0 z-[2] flex items-center justify-center bg-black/5">
-            <Spin size="small" />
-          </div>
+          <SlideThumbSkeleton />
         )}
         {page.visible === false && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/10 z-[3]">

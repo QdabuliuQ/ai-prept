@@ -28,6 +28,7 @@ import {
   jobStatusBadge,
   LoadingButton,
   needsBrowserHtmlConvert,
+  toneBadge,
   useConfirmDialog,
 } from "./shared";
 import type { GenerateJob } from "./types";
@@ -332,7 +333,7 @@ export function JobsPanel() {
         </LoadingButton>
       </div>
 
-      <div className="rounded-lg border bg-white">
+      <div className="rounded-lg border border-border bg-card">
         <Table>
           <TableHeader>
             <TableRow>
@@ -395,9 +396,7 @@ export function JobsPanel() {
                         {row.pipeline === "html-slide" ? (
                           <Badge variant="secondary">HTML</Badge>
                         ) : (
-                          <Badge className="border-transparent bg-cyan-100 text-cyan-800 hover:bg-cyan-100">
-                            PPT Master
-                          </Badge>
+                          <Badge className={toneBadge.cyan}>PPT Master</Badge>
                         )}
                       </TableCell>
                       <TableCell>{jobStatusBadge(row.status)}</TableCell>
@@ -562,7 +561,7 @@ export function JobsPanel() {
             className={cn(
               "m-0 max-h-[min(60vh,480px)] overflow-auto rounded-lg p-3.5 text-xs leading-relaxed",
               "whitespace-pre-wrap break-words font-mono",
-              "bg-[#0f1115] text-[#c8f0c8]",
+              "bg-zinc-950 text-emerald-300 dark:bg-black dark:text-emerald-300",
             )}
           >
             {logJob?.log || ""}

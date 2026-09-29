@@ -13,7 +13,7 @@ export const useI18n = () => {
    */
   const changeLanguage = (lang: string) => {
     localStorage.setItem('language', lang);
-    // ConfigProvider 已订阅 i18n.language，无需整页刷新
+    // i18n 变更会触发订阅组件重渲染，无需整页刷新
     void i18n.changeLanguage(lang);
     if (typeof document !== 'undefined') {
       document.documentElement.lang = lang;

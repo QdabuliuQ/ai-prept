@@ -1,43 +1,60 @@
+import logo from "@/assets/images/ai-prept-logo.png";
 import { LanguageSwitcher, ThemeSwitcher } from "@/components";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "@/constants/canvas";
 import { useTranslation } from "react-i18next";
-import { useMenuActiveStore, usePPTStore } from "@/store";
-import { loadDocument, parsePPTDocumentJSON } from "@/utils/loadDocument";
+import { useGalleryRemixStore, useMenuActiveStore, usePPTStore } from "@/store";
 import { exportPageAsImage } from "@/utils/tool";
-import { LoadingOutlined } from "@ant-design/icons";
+import { ChevronDown, FileImage, FileSpreadsheet, FileText, LayoutTemplate, Loader2 } from "lucide-react";
 import {
-  FileAddition,
-  FileJpg,
-  FilePdf,
-  FilePpt,
-  FileSettings,
+  EditTwo,
+  Page,
+  PlayOne,
+  Switch,
 } from "@icon-park/react";
 import { useMemoizedFn } from "ahooks";
-import { Button, Tooltip, message } from "antd";
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FC } from "react";
+import { useEffect, useMemo, useRef, useState, type FC, type ReactNode } from "react";
+import { Link } from "react-router-dom";
+import { toast } from "sonner";
 import styles from "./index.module.less";
 
-const LIGHT_MENU_KEYS = new Set(["start", "toggle", "play", "view"]);
+const LIGHT_MENU_KEYS = new Set(["start", "edit", "toggle", "play"]);
+const PPTX_TOAST_ID = "html-to-pptx-export-progress";
 
 export const Header: FC = () => {
   const { t } = useTranslation();
   const menuItems = useMemo(
-    () => [
+    (): Array<{ label: string; key: string; icon: ReactNode }> => [
+      {
+        label: t("menu.edit"),
+        key: "edit",
+        icon: <EditTwo theme="outline" size="14" fill="currentColor" />,
+      },
       {
         label: t("menu.start"),
         key: "start",
+        icon: <Page theme="outline" size="14" fill="currentColor" />,
       },
       {
         label: t("menu.toggle"),
         key: "toggle",
+        icon: <Switch theme="outline" size="14" fill="currentColor" />,
       },
       {
         label: t("menu.play"),
         key: "play",
-      },
-      {
-        label: t("menu.view"),
-        key: "view",
+        icon: <PlayOne theme="outline" size="14" fill="currentColor" />,
       },
     ],
     [t]
@@ -64,96 +81,21 @@ export const Header: FC = () => {
   const setName = usePPTStore((state) => state.setName);
   const getName = usePPTStore((state) => state.getName);
   const getPages = usePPTStore((state) => state.getPages);
-  const getTheme = usePPTStore((state) => state.getTheme);
+  const remixBusy = useGalleryRemixStore((state) => state.busy);
   const inputRef = useRef<HTMLInputElement>(null);
-  const importInputRef = useRef<HTMLInputElement>(null);
   const [isEdit, setIsEdit] = useState(false);
-  const [importLoading, setImportLoading] = useState(false);
-  const [exportLoading, setExportLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false);
   const [pptxLoading, setPptxLoading] = useState(false);
 
-  // 导入配置文件（覆盖当前 PPT）
-  const handleImportConfigClick = useMemoizedFn(() => {
-    if (importLoading) return;
-    importInputRef.current?.click();
-  });
-
-  const handleImportConfigChange = useMemoizedFn(
-    async (e: ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      // 允许重复选择同一文件
-      e.target.value = "";
-      if (!file || importLoading) return;
-
-      setImportLoading(true);
-      try {
-        const text = await file.text();
-        const doc = parsePPTDocumentJSON(text);
-        loadDocument(doc);
-        message.success(t("header.importSuccess"));
-      } catch (error) {
-        console.error("导入配置文件失败:", error);
-        const code =
-          error instanceof Error ? error.message : "IMPORT_FAILED";
-        if (code === "INVALID_PAGES" || code === "INVALID_FORMAT") {
-          message.error(t("header.importInvalidPages"));
-        } else {
-          message.error(t("header.importFailed"));
-        }
-      } finally {
-        setTimeout(() => {
-          setImportLoading(false);
-        }, 200);
-      }
-    }
-  );
-
-  // 导出配置文件
-  const handleExportConfig = useMemoizedFn(async () => {
-    if (exportLoading) return;
-
-    setExportLoading(true);
-    try {
-      // 获取数据
-      const configData = {
-        name: getName(),
-        theme: getTheme(),
-        pages: getPages(),
-      };
-
-      // 转换为 JSON 字符串
-      const jsonString = JSON.stringify(configData, null, 2);
-
-      // 创建 Blob 对象
-      const blob = new Blob([jsonString], { type: "application/json" });
-
-      // 创建下载链接
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${name || t("header.untitled")}.json`;
-
-      // 触发下载
-      document.body.appendChild(link);
-      link.click();
-
-      // 清理
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error("导出配置文件失败:", error);
-    } finally {
-      setTimeout(() => {
-        setExportLoading(false);
-      }, 200);
-    }
-  });
+  const exportBlocked = remixBusy;
+  const exportBlockedTitle = t("header.exportBlockedGenerating");
+  const exportBusy = pdfLoading || imageLoading || pptxLoading;
+  const exportDisabled = exportBlocked || exportBusy;
 
   // 导出PDF
   const handleExportPdf = useMemoizedFn(async () => {
-    if (pdfLoading) return;
+    if (exportDisabled) return;
 
     setPdfLoading(true);
     try {
@@ -260,14 +202,13 @@ export const Header: FC = () => {
 
   // 导出 PPTX：html-slide → @webppt/html-to-pptx
   const handleExportPptx = useMemoizedFn(async () => {
-    if (pptxLoading) return;
+    if (exportDisabled) return;
 
     setPptxLoading(true);
-    const loadingMessageKey = "html-to-pptx-export-progress";
     try {
       const pages = getPages().filter((page) => page.visible !== false);
       if (pages.length === 0) {
-        message.warning(t("header.noExportPages"));
+        toast.warning(t("header.noExportPages"));
         return;
       }
 
@@ -283,37 +224,37 @@ export const Header: FC = () => {
         name: getName(),
         pages,
         onProgress: ({ current, total }) => {
-          message.loading({
-            key: loadingMessageKey,
-            duration: 0,
-            content: t("header.domToPptxExportProgress", { current, total }),
+          const percent =
+            total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
+          toast.loading(t("header.domToPptxExportProgress", { percent }), {
+            id: PPTX_TOAST_ID,
           });
         },
       });
-      message.destroy(loadingMessageKey);
-      message.success(t("header.domToPptxSuccess"));
+      toast.dismiss(PPTX_TOAST_ID);
+      toast.success(t("header.domToPptxSuccess"));
       if (result.skippedLegacyCount > 0) {
-        message.info(
+        toast.message(
           t("header.domToPptxSkippedLegacy", {
             count: result.skippedLegacyCount,
           }),
         );
       }
     } catch (error) {
-      message.destroy(loadingMessageKey);
+      toast.dismiss(PPTX_TOAST_ID);
       console.error("PPTX 导出失败:", error);
       const msg = error instanceof Error ? error.message : String(error);
       const isChunk =
         /Loading chunk|ChunkLoadError|Failed to fetch dynamically imported/i.test(
           msg,
         );
-      message.error(
+      toast.error(
         isChunk
           ? "导出模块加载失败（开发态分包未就绪）。请硬刷新页面后重试。"
           : msg || t("header.domToPptxFailed"),
       );
     } finally {
-      message.destroy(loadingMessageKey);
+      toast.dismiss(PPTX_TOAST_ID);
       setTimeout(() => {
         setPptxLoading(false);
       }, 200);
@@ -322,7 +263,7 @@ export const Header: FC = () => {
 
   // 导出所有画布为长图
   const handleExportLongImage = useMemoizedFn(async () => {
-    if (imageLoading) return;
+    if (exportDisabled) return;
 
     setImageLoading(true);
     try {
@@ -416,16 +357,55 @@ export const Header: FC = () => {
     }
   });
 
+  const exportMenuItems = useMemo(
+    () => [
+      {
+        key: "pdf",
+        icon: <FileText className="size-3.5" />,
+        label: t("header.exportPdf"),
+        onSelect: () => {
+          void handleExportPdf();
+        },
+      },
+      {
+        key: "image",
+        icon: <FileImage className="size-3.5" />,
+        label: t("header.exportImage"),
+        onSelect: () => {
+          void handleExportLongImage();
+        },
+      },
+      {
+        key: "pptx",
+        icon: <FileSpreadsheet className="size-3.5" />,
+        label: t("header.exportDomToPptx"),
+        onSelect: () => {
+          void handleExportPptx();
+        },
+      },
+    ],
+    [t, handleExportPdf, handleExportLongImage, handleExportPptx],
+  );
+
   return (
-    <div
-      className={`${styles.headerBar} px-[20px] pt-[10px] pb-[8px] flex items-center shrink-0 gap-[0px]`}
-    >
-      {/* 左侧：与预览列表同宽 */}
-      <div
-        className={`${styles.headerLeft} flex items-center gap-[4px] min-w-0 shrink-0 overflow-hidden`}
-      >
+    <header className={styles.headerBar}>
+      {/* 左侧：logo + 名称，与预览列表同宽 */}
+      <div className={styles.headerLeft}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Link to="/" className={styles.brandLink} aria-label={t("header.home")}>
+              <img
+                src={logo}
+                alt="Ai Prept"
+                width={28}
+                height={28}
+                className={styles.brandLogo}
+              />
+            </Link>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("header.home")}</TooltipContent>
+        </Tooltip>
         <div className={styles.titleWrap}>
-          {/* 文本显示 */}
           <span
             className={`${styles.titleText} cursor-text transition-opacity duration-200 ease-in-out block w-full truncate ${
               !isEdit
@@ -442,7 +422,6 @@ export const Header: FC = () => {
           >
             {name || t("header.untitled")}
           </span>
-          {/* 输入框 */}
           <input
             ref={inputRef}
             type="text"
@@ -453,6 +432,7 @@ export const Header: FC = () => {
               setIsEdit(false);
             }}
             maxLength={50}
+            aria-label={t("header.untitled")}
             style={{
               opacity: isEdit ? 1 : 0,
               position: !isEdit ? "absolute" : "relative",
@@ -463,124 +443,106 @@ export const Header: FC = () => {
             }}
           />
         </div>
-        <div
-          className={`flex items-center gap-[2px] shrink-0 ${styles.exportBtn}`}
-        >
-          <input
-            ref={importInputRef}
-            type="file"
-            accept=".json,application/json"
-            style={{ display: "none" }}
-            onChange={handleImportConfigChange}
-          />
-          <Tooltip placement="bottomLeft" title="PPT 模板">
-            <Button
-              size="small"
-              type="text"
-              href="/templates"
-            >
-              模板
-            </Button>
-          </Tooltip>
-          <Tooltip placement="bottomLeft" title={t("header.importConfig")}>
-            <Button
-              size="small"
-              type="text"
-              icon={
-                importLoading ? (
-                  <LoadingOutlined spin style={{ color: "#f25f00" }} />
-                ) : (
-                  <FileAddition theme="outline" size="16" fill="currentColor" />
-                )
-              }
-              disabled={importLoading}
-              onClick={handleImportConfigClick}
-            />
-          </Tooltip>
-          <Tooltip placement="bottom" title={t("header.exportConfig")}>
-            <Button
-              size="small"
-              type="text"
-              icon={
-                exportLoading ? (
-                  <LoadingOutlined spin style={{ color: "#f25f00" }} />
-                ) : (
-                  <FileSettings theme="outline" size="16" fill="currentColor" />
-                )
-              }
-              disabled={exportLoading}
-              onClick={handleExportConfig}
-            />
-          </Tooltip>
-          <Tooltip placement="bottom" title={t("header.exportPdf")}>
-            <Button
-              size="small"
-              type="text"
-              icon={
-                pdfLoading ? (
-                  <LoadingOutlined spin style={{ color: "#f25f00" }} />
-                ) : (
-                  <FilePdf theme="outline" size="16" fill="currentColor" />
-                )
-              }
-              disabled={pdfLoading}
-              onClick={handleExportPdf}
-            />
-          </Tooltip>
-          <Tooltip placement="bottom" title={t("header.exportImage")}>
-            <Button
-              size="small"
-              type="text"
-              icon={
-                imageLoading ? (
-                  <LoadingOutlined spin style={{ color: "#f25f00" }} />
-                ) : (
-                  <FileJpg theme="outline" size="16" fill="currentColor" />
-                )
-              }
-              disabled={imageLoading}
-              onClick={handleExportLongImage}
-            />
-          </Tooltip>
-          <Tooltip placement="bottom" title={t("header.exportDomToPptx")}>
-            <Button
-              size="small"
-              type="text"
-              icon={
-                pptxLoading ? (
-                  <LoadingOutlined spin style={{ color: "#f25f00" }} />
-                ) : (
-                  <FilePpt theme="filled" size="16" fill="currentColor" />
-                )
-              }
-              disabled={pptxLoading}
-              onClick={handleExportPptx}
-            />
-          </Tooltip>
-        </div>
       </div>
-      {/* 右侧：占满剩余宽度 */}
-      <div className="flex-1 min-w-0 flex items-center justify-between pl-[8px]">
-        <div className="flex items-center gap-[28px] select-none justify-center flex-1 min-w-0">
-          {menuItems.map((item) => (
-            <div
-              className={`${styles.navItem} text-[13px] cursor-pointer transition-colors duration-200 ease-in-out ${
-                menuActive === item.key
-                  ? `text-[var(--primary-color)] ${styles.activeItem}`
-                  : "text-chrome-secondary hover:text-[var(--primary-color)]"
-              }`}
-              key={item.key}
-              onClick={() => setActiveMenu(item.key)}
-            >
-              {item.label}
-            </div>
-          ))}
+
+      <div className={styles.toolbar}>
+        <div className={styles.exportGroup}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={styles.exportTrigger}
+                asChild
+              >
+                <Link to="/templates">
+                  <LayoutTemplate className="size-3.5" />
+                  <span>{t("header.templates")}</span>
+                </Link>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {t("header.templatesImport")}
+            </TooltipContent>
+          </Tooltip>
+          {exportBlocked ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex cursor-not-allowed">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled
+                    className={styles.exportTrigger}
+                  >
+                    <span>{t("header.export")}</span>
+                    <ChevronDown className="size-3" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">{exportBlockedTitle}</TooltipContent>
+            </Tooltip>
+          ) : (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className={styles.exportTrigger}
+                  disabled={exportBusy}
+                >
+                  {exportBusy ? (
+                    <Loader2 className="size-3.5 animate-spin text-[var(--primary-color)]" />
+                  ) : null}
+                  <span>{t("header.export")}</span>
+                  <ChevronDown className="size-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="min-w-[10rem] text-[12px]">
+                {exportMenuItems.map((item) => (
+                  <DropdownMenuItem
+                    key={item.key}
+                    className="gap-2 text-[12px]"
+                    disabled={exportDisabled}
+                    onSelect={item.onSelect}
+                  >
+                    {item.icon}
+                    {item.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
-        <div className="flex justify-end shrink-0 items-center gap-[4px]">
+
+        <nav className={styles.navTrack} aria-label="editor modes">
+          {menuItems.map((item) => {
+            const active = menuActive === item.key;
+            return (
+              <button
+                type="button"
+                key={item.key}
+                className={`${styles.navItem} ${active ? styles.activeItem : ""}`}
+                aria-current={active ? "page" : undefined}
+                onClick={() => setActiveMenu(item.key)}
+              >
+                <i className={styles.navIcon} aria-hidden>
+                  {item.icon}
+                </i>
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className={styles.utils}>
           <ThemeSwitcher />
           <LanguageSwitcher />
         </div>
       </div>
-    </div>
+    </header>
   );
 };

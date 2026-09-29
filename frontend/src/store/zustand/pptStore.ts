@@ -3,7 +3,7 @@ import { MAX_PAGES } from "@/constants/limits";
 import i18n from "@/i18n";
 import { applyDocumentTheme, DEFAULT_PPT_THEME, toThemeToken } from "@/theme";
 import { getRandomId } from "@/utils";
-import { message } from "antd";
+import { toast } from "sonner";
 import { create } from "zustand";
 
 export type Page = {
@@ -169,7 +169,7 @@ export const usePPTStore = create<PPTState>((set, get) => ({
 
   addPage: (afterPageId?) => {
     if (get().pages.length >= MAX_PAGES) {
-      message.warning(i18n.t("limits.maxPages", { count: MAX_PAGES }));
+      toast.warning(i18n.t("limits.maxPages", { count: MAX_PAGES }));
       return null;
     }
 
@@ -198,7 +198,7 @@ export const usePPTStore = create<PPTState>((set, get) => ({
 
   duplicatePage: (pageId) => {
     if (get().pages.length >= MAX_PAGES) {
-      message.warning(i18n.t("limits.maxPages", { count: MAX_PAGES }));
+      toast.warning(i18n.t("limits.maxPages", { count: MAX_PAGES }));
       return null;
     }
 

@@ -16,6 +16,7 @@ from typing import Any, Callable
 from config import is_mock, load_env
 from public_id import alloc_public_template_id
 from llm import chat_json, make_client_pool
+from image.generate import normalize_img_object_fit
 
 LogFn = Callable[[str], None]
 
@@ -45,6 +46,30 @@ _TITLE_ROLES = frozenset(
 )
 # 缩字号下限：保版式可读性，再短则截断文案
 _MIN_FONT_SCALE = 0.7
+
+
+def _lookup_file_map(by_file: dict[str, Any] | Any, rel: str) -> dict[str, Any]:
+    """Resolve per-slide map; tolerate basename / alternate path keys from LLM."""
+    if not isinstance(by_file, dict):
+        return {}
+    direct = by_file.get(rel)
+    if isinstance(direct, dict):
+        return direct
+    base = Path(rel).name
+    for key, val in by_file.items():
+        if not isinstance(val, dict):
+            continue
+        k = str(key).strip().replace("\\", "/")
+        if k == base or k.endswith("/" + base) or Path(k).name == base:
+            return val
+    return {}
+
+
+def _write_template_meta(dest: Path, meta: dict[str, Any]) -> None:
+    (dest / "template.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 def _log(log: LogFn | None, msg: str) -> None:
@@ -80,7 +105,7 @@ def _char_advance_px(ch: str, font_px: float) -> float:
         or 0xFF01 <= o <= 0xFF60
         or 0xFFE0 <= o <= 0xFFE6
     ):
-        return font_px * 1.0
+        return font_px * 1.02
     return font_px * 0.58
 
 
@@ -151,7 +176,7 @@ def estimate_max_chars(
     if box and box.get("width_px", 0) > 0 and box.get("font_px", 0) > 0:
         # Conservative: assume CJK advance so Latin still fits
         avg = float(box["font_px"]) + float(box.get("letter_spacing_px") or 0)
-        per_line = max(1, int((float(box["width_px"]) * 0.96) / max(avg, 1.0)))
+        per_line = max(1, int((float(box["width_px"]) * 0.9) / max(avg, 1.0)))
         lines = int(box.get("lines") or 1)
         box_cap = max(1, per_line * max(1, lines))
 
@@ -166,14 +191,14 @@ def estimate_max_chars(
 
 
 def clamp_text_to_max_chars(text: str, max_chars: int) -> str:
-    """Clamp plain text to max_chars (newline-aware; keeps first N chars of content)."""
+    """Clamp plain text to max_chars; prefer sentence/phrase boundaries."""
     raw = str(text or "")
     if max_chars <= 0 or len(raw.replace("\n", "")) <= max_chars:
         return raw
     # Prefer preserving line structure when multi-line
     lines = raw.splitlines()
     if len(lines) <= 1:
-        return raw.replace("\n", "")[:max_chars]
+        return _cut_at_phrase_boundary(raw.replace("\n", ""), max_chars)
     out: list[str] = []
     used = 0
     for ln in lines:
@@ -185,9 +210,40 @@ def clamp_text_to_max_chars(text: str, max_chars: int) -> str:
             used += len(ln)
         else:
             if room > 0:
-                out.append(ln[:room])
+                out.append(_cut_at_phrase_boundary(ln, room))
             break
-    return "\n".join(out) if out else raw.replace("\n", "")[:max_chars]
+    return "\n".join(out) if out else _cut_at_phrase_boundary(
+        raw.replace("\n", ""), max_chars
+    )
+
+
+_PHRASE_END_STRONG = set("。！？!?；;")
+_PHRASE_END_WEAK = set("，、,：:")
+
+
+def _cut_at_phrase_boundary(text: str, max_chars: int) -> str:
+    """Cut to max_chars but prefer ending on punctuation so copy stays readable."""
+    s = (text or "").strip()
+    if max_chars <= 0 or len(s) <= max_chars:
+        return s
+    hard = s[:max_chars].rstrip()
+    if not hard:
+        return s[:1]
+    # Prefer last strong sentence end in the second half of the budget
+    min_keep = max(1, max_chars // 2)
+    best = -1
+    for i in range(len(hard) - 1, min_keep - 1, -1):
+        if hard[i] in _PHRASE_END_STRONG:
+            best = i
+            break
+    if best < 0:
+        for i in range(len(hard) - 1, min_keep - 1, -1):
+            if hard[i] in _PHRASE_END_WEAK:
+                best = i
+                break
+    if best >= 0:
+        return hard[: best + 1].rstrip()
+    return hard
 
 
 def _scale_typography_in_fragment(content: str, scale: float) -> str:
@@ -224,7 +280,13 @@ def _truncate_to_width(
             lo = mid + 1
         else:
             hi = mid - 1
-    return best or text[:1]
+    if not best:
+        return text[:1]
+    # Prefer a complete phrase over a mid-word stump like 「带入日」
+    cut = _cut_at_phrase_boundary(best, len(best))
+    if cut and estimate_text_width_px(cut, font_px, letter_spacing_px) <= max_width_px:
+        return cut
+    return best.rstrip() or text[:1]
 
 
 def fit_slot_inner(attrs: str, content: str) -> tuple[str, dict[str, Any]]:
@@ -244,7 +306,7 @@ def fit_slot_inner(attrs: str, content: str) -> tuple[str, dict[str, Any]]:
 
     # Multi-line: budget by total capacity; single-line nowrap: width only
     lines = text.splitlines() if not box.get("nowrap") and "\n" in text else [text.replace("\n", " ").strip()]
-    usable = width * 0.96
+    usable = width * 0.9
     line_budget = usable
     worst = max(
         (estimate_text_width_px(ln, font_px, ls) for ln in lines if ln),
@@ -441,6 +503,19 @@ def inventory_package_slots(pack_dir: Path) -> list[dict[str, Any]]:
     return out
 
 
+_OVERFLOW_HIDDEN_RE = re.compile(
+    r"overflow\s*:\s*hidden(?:\s+(?:hidden|visible|auto|scroll|clip))*",
+    re.I,
+)
+
+
+def _relax_text_slot_open_tag(open_tag: str) -> str:
+    """Text slots: overflow:hidden 会裁切首尾字形；改为 visible。"""
+    if re.search(r"""data-slot-type\s*=\s*["']image["']""", open_tag, re.I):
+        return open_tag
+    return _OVERFLOW_HIDDEN_RE.sub("overflow: visible", open_tag)
+
+
 def apply_text_to_html(
     html: str,
     updates: dict[str, str],
@@ -483,7 +558,8 @@ def apply_text_to_html(
         new_content = _replace_span_texts(content, new_text)
         if fit:
             new_content, _info = fit_slot_inner(attrs, new_content)
-        out = out[:open_end] + new_content + tail + out[close_end:]
+        open_tag = _relax_text_slot_open_tag(out[open_start:open_end])
+        out = out[:open_start] + open_tag + new_content + tail + out[close_end:]
     return out
 
 
@@ -654,9 +730,10 @@ def _plan_content(
 }}
 约束：
 1. texts 的每个 file/slot 必须出现；文案字符数（不含换行）必须 ≤ max_chars，宁可短不可超。
-2. 标题/短标签保持短句；不要硬塞长句进窄槽。
-3. 不要输出 HTML；不要解释。
-4. 数字/指标可按新主题合理改写。
+2. 每个槽位只写一条完整可读短句/短语；禁止半截词、半截句，禁止把两句硬塞进窄槽。
+3. 标题/短标签保持短句；装不下就换更短的完整表达，不要靠截断。
+4. 不要输出 HTML；不要解释。
+5. 数字/指标可按新主题合理改写。
 """
     from config import llm_config
 
@@ -712,7 +789,39 @@ def remix_template_package(
         if p.is_file():
             visual_brief += f"\n## {name}\n" + p.read_text(encoding="utf-8")[:4000]
 
-    slots = inventory_package_slots(source_dir)
+    new_id = alloc_public_template_id(out_root)
+    dest = out_root / new_id
+    for _ in range(8):
+        if not dest.exists():
+            break
+        new_id = alloc_public_template_id(out_root)
+        dest = out_root / new_id
+    _log(log, f"[remix] cloning → {dest.name}")
+    try:
+        _copy_package(source_dir, dest)
+    except FileExistsError:
+        new_id = alloc_public_template_id(out_root)
+        dest = out_root / new_id
+        _log(log, f"[remix] dest busy, retry → {dest.name}")
+        _copy_package(source_dir, dest)
+
+    # 先补组内漏槽，再 inventory / 规划（嵌套标题等才能进 LLM）
+    try:
+        from templates.slot_ensure import ensure_package_orphan_slots
+
+        slot_stats = ensure_package_orphan_slots(
+            dest, log=lambda m: _log(log, m)
+        )
+        if slot_stats.get("text") or slot_stats.get("image"):
+            _log(
+                log,
+                f"[remix] orphan slots patched files={slot_stats.get('files')} "
+                f"text=+{slot_stats.get('text')} image=+{slot_stats.get('image')}",
+            )
+    except Exception as e:  # noqa: BLE001
+        _log(log, f"[remix] orphan slot patch skipped: {e}")
+
+    slots = inventory_package_slots(dest)
     text_slots = [s for s in slots if s["type"] == "text"]
     image_slots = [s for s in slots if s["type"] == "image"]
     _log(
@@ -740,67 +849,16 @@ def remix_template_package(
     texts_by_file = plan.get("texts") if isinstance(plan.get("texts"), dict) else {}
     images_by_file = plan.get("images") if isinstance(plan.get("images"), dict) else {}
 
-    new_id = alloc_public_template_id(out_root)
-    dest = out_root / new_id
-    for _ in range(8):
-        if not dest.exists():
-            break
-        new_id = alloc_public_template_id(out_root)
-        dest = out_root / new_id
-    _log(log, f"[remix] cloning → {dest.name}")
-    try:
-        _copy_package(source_dir, dest)
-    except FileExistsError:
-        new_id = alloc_public_template_id(out_root)
-        dest = out_root / new_id
-        _log(log, f"[remix] dest busy, retry → {dest.name}")
-        _copy_package(source_dir, dest)
-
     # drop qiniu/upload provenance from clone
     try:
         new_meta = json.loads((dest / "template.json").read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
         raise RuntimeError(f"克隆后 template.json 损坏: {e}") from e
 
-    regen_files: list[str] = []
-    for slide in pages if isinstance(pages, list) else []:
-        if not isinstance(slide, dict):
-            continue
-        rel = str(slide.get("file") or "").strip()
-        if not rel:
-            continue
-        path = dest / rel
-        if not path.is_file():
-            continue
-        html = path.read_text(encoding="utf-8")
-        file_texts = texts_by_file.get(rel) if isinstance(texts_by_file.get(rel), dict) else {}
-        # also accept flat keys without path prefix
-        if not file_texts:
-            file_texts = {
-                s["slot"]: texts_by_file.get(s["slot"])
-                for s in text_slots
-                if s["file"] == rel and isinstance(texts_by_file.get(s["slot"]), str)
-            }
-        file_texts = {str(k): str(v) for k, v in (file_texts or {}).items() if v is not None}
-        file_slots = [s for s in text_slots if s["file"] == rel]
-        file_texts = clamp_texts_for_slots(file_texts, file_slots)
-        html = apply_text_to_html(html, file_texts, fit=True)
+    from templates.categories import coerce_category
 
-        file_imgs = images_by_file.get(rel) if isinstance(images_by_file.get(rel), dict) else {}
-        file_imgs = {str(k): str(v) for k, v in (file_imgs or {}).items() if v}
-        if file_imgs and not skip_images:
-            html, regen = apply_image_hints_to_html(html, file_imgs)
-            regen_files.extend(regen)
-        path.write_text(html if html.endswith("\n") else html + "\n", encoding="utf-8")
-
-        # update slide title from page-title / title slot when present
-        title_val = (
-            file_texts.get("title")
-            or file_texts.get("page-title")
-            or next((file_texts[k] for k in file_texts if "title" in k), None)
-        )
-        if title_val:
-            slide["title"] = str(title_val)[:80]
+    slide_list = [s for s in (pages if isinstance(pages, list) else []) if isinstance(s, dict)]
+    page_total = sum(1 for s in slide_list if str(s.get("file") or "").strip())
 
     new_meta["template_id"] = new_id
     new_meta["public_id"] = new_id
@@ -809,8 +867,6 @@ def remix_template_package(
         "zh_CN": desc_zh,
         "en_US": desc_zh,
     }
-    from templates.categories import coerce_category
-
     # remix 保留源模板视觉类型（= 风格）
     new_meta["category"] = coerce_category(
         new_meta.get("category")
@@ -825,45 +881,123 @@ def remix_template_package(
         "mode": "content-slots",
         "source_template_id": source_id,
         "prompt": prompt[:2000],
+        "in_progress": True,
     }
     new_meta.pop("storage", None)
     new_meta.pop("preview", None)
     if isinstance(pages, list):
         new_meta["slides"] = pages
+    # 尽早落盘，供编辑器按页拉取（仍含源文案，随后逐页覆写）
+    _write_template_meta(dest, new_meta)
+    try:
+        os.utime(dest, None)
+    except OSError:
+        pass
+    _log(log, f"[remix-cloned] id={new_id} total={page_total}")
 
-    # force image regen: delete listed files so materialize rewrites them
+    regen_files: list[str] = []
+    text_applied = 0
+    page_done = 0
+    for slide in slide_list:
+        rel = str(slide.get("file") or "").strip()
+        if not rel:
+            continue
+        path = dest / rel
+        if not path.is_file():
+            continue
+        html_before = path.read_text(encoding="utf-8")
+        html = html_before
+        file_texts = dict(_lookup_file_map(texts_by_file, rel))
+        # also accept flat keys without path prefix
+        if not file_texts:
+            file_texts = {
+                s["slot"]: texts_by_file.get(s["slot"])
+                for s in text_slots
+                if s["file"] == rel and isinstance(texts_by_file.get(s["slot"]), str)
+            }
+        file_texts = {str(k): str(v) for k, v in (file_texts or {}).items() if v is not None}
+        file_slots = [s for s in text_slots if s["file"] == rel]
+        file_texts = clamp_texts_for_slots(file_texts, file_slots)
+        html = apply_text_to_html(html, file_texts, fit=True)
+        if file_texts and html != html_before:
+            text_applied += len(file_texts)
+
+        file_imgs = dict(_lookup_file_map(images_by_file, rel))
+        file_imgs = {str(k): str(v) for k, v in (file_imgs or {}).items() if v}
+        if file_imgs and not skip_images:
+            html, regen = apply_image_hints_to_html(html, file_imgs)
+            regen_files.extend(regen)
+        # PPTX→HTML 默认 object-fit:fill 会拉伸新图；统一 cover 保比例
+        html = normalize_img_object_fit(html)
+        path.write_text(html if html.endswith("\n") else html + "\n", encoding="utf-8")
+
+        # update slide title from page-title / title slot when present
+        title_val = (
+            file_texts.get("title")
+            or file_texts.get("page-title")
+            or next((file_texts[k] for k in file_texts if "title" in k), None)
+        )
+        if title_val:
+            slide["title"] = str(title_val)[:80]
+
+        page_done += 1
+        _log(
+            log,
+            f"[remix-page] id={new_id} file={rel} index={page_done - 1} "
+            f"done={page_done} total={page_total} texts={len(file_texts)}",
+        )
+
+    if text_slots and text_applied == 0:
+        raise RuntimeError(
+            "套用未写入任何文本槽：模型输出与 data-slot 未对齐。"
+            "请重试或更换内容要求。"
+        )
+
+    # 强制覆写需换图的文件（不先删，避免预览空窗期 404）
     if regen_files and not skip_images and not use_mock:
-        images_dir = dest / "images"
-        for name in set(regen_files):
-            fp = images_dir / name
-            if fp.is_file():
-                try:
-                    fp.unlink()
-                except OSError:
-                    pass
-        _log(log, f"[remix] rematerialize images ×{len(set(regen_files))}")
+        force_names = set(regen_files)
+        _log(log, f"[remix] rematerialize images ×{len(force_names)} (force overwrite)")
         try:
             from templates.write import rematerialize_package_images
 
-            warnings = rematerialize_package_images(dest)
+            warnings = rematerialize_package_images(dest, force_files=force_names)
             for w in warnings:
                 _log(log, f"[remix] image warn: {w}")
         except Exception as e:
             _log(log, f"[remix] image rematerialize skipped: {e}")
     elif skip_images:
         _log(log, "[remix] images kept (skip)")
+        # 即使不换图，也修掉 fill 拉伸
+        for slide in pages if isinstance(pages, list) else []:
+            rel = str((slide or {}).get("file") or "").strip()
+            if not rel:
+                continue
+            path = dest / rel
+            if not path.is_file():
+                continue
+            raw = path.read_text(encoding="utf-8")
+            fixed = normalize_img_object_fit(raw)
+            if fixed != raw:
+                path.write_text(fixed if fixed.endswith("\n") else fixed + "\n", encoding="utf-8")
 
-    (dest / "template.json").write_text(
-        json.dumps(new_meta, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    if isinstance(pages, list):
+        new_meta["slides"] = pages
+    remix_meta = dict(new_meta.get("remix") or {})
+    remix_meta.pop("in_progress", None)
+    remix_meta["text_applied"] = text_applied
+    new_meta["remix"] = remix_meta
+    _write_template_meta(dest, new_meta)
     # Bump directory mtime so Admin list (sorted by folder time) surfaces this pack.
     try:
         os.utime(dest, None)
     except OSError:
         pass
     _log(log, f"[remix] wrote {dest}")
-    _log(log, f"[progress] done=1 total=1 ok=1 fail=0 skip=0 id={new_id} status=ok")
+    _log(
+        log,
+        f"[progress] done={page_total or 1} total={page_total or 1} "
+        f"ok={page_total or 1} fail=0 skip=0 id={new_id} status=ok",
+    )
     return {
         "ok": True,
         "template_id": new_id,
@@ -871,6 +1005,7 @@ def remix_template_package(
         "source_template_id": source_id,
         "text_slots": len(text_slots),
         "image_slots": len(image_slots),
+        "text_applied": text_applied,
         "label_zh": label_zh,
     }
 

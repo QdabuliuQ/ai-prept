@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
+import { ThemeSwitcher } from "@/components";
 import {
   Card,
   CardContent,
@@ -36,7 +37,10 @@ export function LoginGate({ onOk }: { onOk: () => void }) {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-neutral-50 p-6">
+    <div className="relative flex min-h-screen items-center justify-center bg-background p-6">
+      <div className="absolute right-4 top-4">
+        <ThemeSwitcher />
+      </div>
       <Card className="w-full max-w-md shadow-sm">
         <CardHeader>
           <CardTitle className="text-xl">WebPPT 模板后台</CardTitle>

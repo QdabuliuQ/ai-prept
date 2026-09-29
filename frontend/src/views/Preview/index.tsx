@@ -22,7 +22,6 @@ import {
   getCachedThumbnail,
   scheduleVisibleThumbnails,
   usePageThumbnail,
-  usePageThumbnailLoading,
   usePagesThumbnailSync,
 } from "@/utils/pageThumbnail";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -35,8 +34,8 @@ import {
   Up,
 } from "@icon-park/react";
 import { useKeyPress, useMemoizedFn, useMount } from "ahooks";
-import { Spin } from "antd";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
+import { SlideThumbSkeleton } from "@/components/SlideThumbSkeleton";
 import {
   memo,
   useEffect,
@@ -82,7 +81,6 @@ const PageItem: FC<{
   }) => {
     const isActive = pageActive === page.id;
     const thumbnailUrl = usePageThumbnail(page);
-    const isLoading = usePageThumbnailLoading(page);
 
     return (
       <div
@@ -112,12 +110,7 @@ const PageItem: FC<{
                 draggable={false}
               />
             ) : (
-              <div className={styles.thumbSkeleton} />
-            )}
-            {!thumbnailUrl && isLoading && (
-              <div className={styles.thumbLoading}>
-                <Spin size="small" />
-              </div>
+              <SlideThumbSkeleton />
             )}
             {page.visible === false && (
               <div

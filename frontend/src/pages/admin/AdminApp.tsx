@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { ThemeSwitcher } from "@/components";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/sonner";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { useThemeStore } from "@/store";
 import { adminFetch, clearToken, readToken } from "./api";
 import { GeneratePanel } from "./GeneratePanel";
 import { JobsPanel } from "./JobsPanel";
@@ -13,6 +16,13 @@ function AdminShell() {
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState("templates");
   const [focusTemplateId, setFocusTemplateId] = useState<string | null>(null);
+  const themeMode = useThemeStore((state) => state.theme);
+  const hydrateTheme = useThemeStore((state) => state.hydrateTheme);
+  const toasterTheme = themeMode === "dark" ? "dark" : "light";
+
+  useEffect(() => {
+    hydrateTheme();
+  }, [hydrateTheme]);
 
   useEffect(() => {
     const boot = async () => {
@@ -39,7 +49,7 @@ function AdminShell() {
 
   if (!ready) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-neutral-50 text-muted-foreground">
+      <div className="flex min-h-screen items-center justify-center bg-background text-muted-foreground">
         加载中…
       </div>
     );
@@ -48,21 +58,22 @@ function AdminShell() {
   if (!authed) {
     return (
       <>
-        <Toaster theme="light" position="top-center" />
+        <Toaster theme={toasterTheme} position="top-center" />
         <LoginGate onOk={() => setAuthed(true)} />
       </>
     );
   }
 
   return (
-    <div className="min-h-screen bg-neutral-50 text-foreground">
-      <Toaster theme="light" position="top-center" />
-      <header className="sticky top-0 z-40 border-b bg-white/95 backdrop-blur">
+    <div className="min-h-screen bg-background text-foreground">
+      <Toaster theme={toasterTheme} position="top-center" />
+      <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1680px] items-center justify-between px-6">
           <h1 className="text-lg font-semibold tracking-tight">
             WebPPT 模板后台
           </h1>
           <nav className="flex items-center gap-1">
+            <ThemeSwitcher />
             <Button variant="ghost" size="sm" asChild>
               <a href="/">模板墙</a>
             </Button>
@@ -70,7 +81,7 @@ function AdminShell() {
               <a href="/templates">公开模板库</a>
             </Button>
             <Button variant="ghost" size="sm" asChild>
-              <a href="/editor">编辑器</a>
+              <a href="/edit">编辑器</a>
             </Button>
             <Button variant="outline" size="sm" onClick={logout}>
               退出
@@ -113,5 +124,9 @@ function AdminShell() {
 }
 
 export default function AdminApp() {
-  return <AdminShell />;
+  return (
+    <TooltipProvider delayDuration={200}>
+      <AdminShell />
+    </TooltipProvider>
+  );
 }

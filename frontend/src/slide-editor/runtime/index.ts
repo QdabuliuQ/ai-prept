@@ -115,6 +115,32 @@ function startSlideEditor(): SlideEditorApi {
     return handleSetTransform(payload, elementSelector);
   });
 
+  bridge.onRequest("APPLY_TEXT_STYLE", async (payload: unknown) => {
+    const data = (payload || {}) as {
+      bold?: boolean | "toggle"
+      italic?: boolean | "toggle"
+      underline?: boolean | "toggle"
+      strike?: boolean | "toggle"
+      textAlign?: "left" | "center" | "right"
+      color?: string
+      fontSize?: number | "increase" | "decrease"
+      selector?: string
+      editorId?: string
+    }
+    const { selector, editorId, ...patch } = data
+    const result = elementSelector.applyTextStyle(patch, { selector, editorId })
+    if (result.success) {
+      const html = serializeCleanHtml()
+      bridge.sendEvent(EventType.CONTENT_CHANGED, {
+        reason: "text-style",
+        html,
+      })
+      return { ...result, html }
+    }
+    console.warn("[slide-editor] APPLY_TEXT_STYLE applied=0", data)
+    return result
+  })
+
   bridge.onRequest("REFRESH_SELECTION", async () => {
     elementSelector.refreshSelection();
     return { success: true };

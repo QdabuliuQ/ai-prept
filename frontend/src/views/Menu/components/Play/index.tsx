@@ -13,7 +13,7 @@ import {
   SlideTwo,
 } from "@icon-park/react";
 import { useMemoizedFn } from "ahooks";
-import { message } from "antd";
+import { toast } from "sonner";
 import { type FC } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -33,7 +33,7 @@ export const PlayComponent: FC = () => {
 
   const handleStartPlay = useMemoizedFn(() => {
     if (pages.length === 0) {
-      message.error(t("playPanel.noPages"));
+      toast.error(t("playPanel.noPages"));
       return;
     }
     enterFullscreen(pages[0].id);
@@ -41,7 +41,7 @@ export const PlayComponent: FC = () => {
 
   const handleCurrentPlay = useMemoizedFn(() => {
     if (!pageActive) {
-      message.error(t("playPanel.noCurrentPage"));
+      toast.error(t("playPanel.noCurrentPage"));
       return;
     }
     enterFullscreen(pageActive);

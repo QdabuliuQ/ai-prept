@@ -132,6 +132,75 @@ function applyAttrs(
   }
 }
 
+function plainText(el: Element): string {
+  return String((el as HTMLElement).innerText || el.textContent || "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function maxFontPt(el: Element): number | null {
+  let best: number | null = null;
+  const nodes = [el, ...el.querySelectorAll("*")];
+  for (const n of nodes) {
+    const st =
+      n.getAttribute?.("style") ||
+      (n as HTMLElement).style?.cssText ||
+      "";
+    const m = st.match(/font-size\s*:\s*([\d.]+)\s*pt/i);
+    if (m) best = Math.max(best || 0, parseFloat(m[1]));
+  }
+  return best;
+}
+
+function inferTextRole(text: string, fontPt: number | null): string {
+  const n = text.length;
+  if (fontPt != null) {
+    if (fontPt >= 40 && n <= 60) return "heading";
+    if (fontPt >= 28 && n <= 100) return "lede";
+  }
+  if (n <= 24) return "meta";
+  if (n <= 80) return "heading";
+  return "body";
+}
+
+/** Tag absolute text boxes that plan matching missed (prefer outermost). */
+function tagOrphanTextSlots(root: HTMLElement) {
+  const cands = [...root.querySelectorAll("div")].filter((el) => {
+    if (el.hasAttribute("data-slot") || el.closest("[data-slot]")) return false;
+    if (el.querySelector("[data-slot]")) return false;
+    if ((el as HTMLElement).style?.position !== "absolute") return false;
+    if (!el.querySelector("span")) return false;
+    return plainText(el).length >= 1;
+  });
+  // outermost: not contained by another candidate
+  const outers = cands.filter(
+    (el) => !cands.some((other) => other !== el && other.contains(el)),
+  );
+  let textI = root.querySelectorAll("[data-slot-type='text']").length;
+  for (const el of outers) {
+    const text = plainText(el);
+    const fontPt = maxFontPt(el);
+    const role = inferTextRole(text, fontPt);
+    let slot: string;
+    if (role === "heading" || role === "page-title") {
+      slot = textI === 0 ? "title" : `title-${textI + 1}`;
+    } else if (role === "lede") {
+      slot = textI === 0 ? "subtitle" : `subtitle-${textI + 1}`;
+    } else if (role === "meta") {
+      slot = textI === 0 ? "eyebrow" : `eyebrow-${textI + 1}`;
+    } else {
+      slot = `body-${textI + 1}`;
+    }
+    applyAttrs(el, {
+      "data-slot": slot,
+      "data-slot-type": "text",
+      "data-slot-role":
+        role === "heading" && textI === 0 ? "page-title" : role,
+    });
+    textI += 1;
+  }
+}
+
 function parseRotateDeg(transform: string): number | null {
   const m = String(transform || "").match(
     /rotate\(\s*(-?[\d.]+)\s*deg\s*\)/i,
@@ -547,7 +616,7 @@ function promoteSvgImagesToImg(root: HTMLElement): number {
     }
 
     img.style.cssText =
-      "width:100%;height:100%;object-fit:fill;display:block;border:0";
+      "width:100%;height:100%;object-fit:cover;display:block;border:0";
 
     if (host && host !== root) {
       if (radius) host.style.borderRadius = radius;
@@ -706,6 +775,7 @@ export async function pptxBrowserConvert(
       let imgI = 0;
       for (const img of root.querySelectorAll("img")) {
         if (img.hasAttribute("data-slot")) continue;
+        if (img.closest("[data-slot]")) continue;
         imgI += 1;
         applyAttrs(img, {
           "data-slot": `image-${imgI}`,
@@ -713,6 +783,8 @@ export async function pptxBrowserConvert(
           "data-slot-role": imgI === 1 ? "hero-image" : "image",
         });
       }
+
+      tagOrphanTextSlots(root);
 
       // Rasterize complex chart/table nodes (best-effort)
       if (complexAsImage) {

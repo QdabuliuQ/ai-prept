@@ -119,10 +119,36 @@ def _extract_workers_ai_text(data: dict[str, Any]) -> str:
     if not data.get("success", True) and data.get("errors"):
         errs = data["errors"]
         raise RuntimeError(f"Workers AI 错误: {errs}")
+
+    def _from_choices(obj: Any) -> str | None:
+        if not isinstance(obj, dict):
+            return None
+        choices = obj.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return None
+        msg = (choices[0] or {}).get("message") or {}
+        content = msg.get("content") if isinstance(msg, dict) else None
+        if isinstance(content, str) and content.strip():
+            return content
+        # 部分模型把文本放在 delta / text
+        text = (choices[0] or {}).get("text")
+        if isinstance(text, str) and text.strip():
+            return text
+        return None
+
+    # OpenAI 兼容：顶层 choices
+    top = _from_choices(data)
+    if top is not None:
+        return top
+
     result = data.get("result")
     if isinstance(result, str):
         return result
     if isinstance(result, dict):
+        # 新格式：result 内嵌 chat.completion（glm / kimi 等）
+        nested = _from_choices(result)
+        if nested is not None:
+            return nested
         if isinstance(result.get("response"), str):
             return result["response"]
         msg = result.get("message")
@@ -130,11 +156,6 @@ def _extract_workers_ai_text(data: dict[str, Any]) -> str:
             return msg["content"]
         if isinstance(result.get("content"), str):
             return result["content"]
-    choices = data.get("choices")
-    if isinstance(choices, list) and choices:
-        msg = (choices[0] or {}).get("message") or {}
-        if isinstance(msg.get("content"), str):
-            return msg["content"]
     raise RuntimeError(f"Workers AI 无法解析响应: {str(data)[:400]}")
 
 
@@ -307,9 +328,10 @@ def _gemini_thinking_extra(model: str) -> dict[str, Any] | None:
 
 
 def _qwen_thinking_extra(model: str) -> dict[str, Any] | None:
-    """硅基 Qwen3：默认关闭思考，否则非流式 JSON 易卡死数分钟。
+    """Qwen3 思考开关。
 
-    LLM_QWEN_THINKING / LLM_LIGHT_THINKING=1 可重新打开。
+    - 硅基等：enable_thinking（默认关，非流式 JSON 易卡死）
+    - Groq：用 reasoning_effort；默认不传，避免不兼容参数
     """
     m = (model or "").lower()
     if "qwen3" not in m and "qwq" not in m:
@@ -319,7 +341,12 @@ def _qwen_thinking_extra(model: str) -> dict[str, Any] | None:
         or os.environ.get("LLM_LIGHT_THINKING")
         or "0"
     ).strip().lower()
-    enable = raw in {"1", "true", "yes", "on", "enabled"}
+    enable = raw in {"1", "true", "yes", "on", "enabled"} or _llm_thinking_on()
+    base = (os.environ.get("LLM_BASE_URL") or "").lower()
+    if "groq.com" in base:
+        if enable:
+            return {"reasoning_effort": "default"}
+        return None
     return {"enable_thinking": enable}
 
 

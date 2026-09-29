@@ -148,6 +148,9 @@ export function getElementSelector(element: Element): string {
 export function isInjectedElement(element: Element): boolean {
   if (element.getAttribute("data-injected") === "true") return true;
   if (element.closest('[data-injected="true"]')) return true;
+  // 生成中骨架 / 占位 UI：不可选、不可改
+  if (element.getAttribute("data-editor-placeholder") === "true") return true;
+  if (element.closest('[data-editor-placeholder="true"]')) return true;
   return false;
 }
 

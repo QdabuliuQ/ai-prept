@@ -29,6 +29,11 @@ export { useChartInspectorStore } from "./chartInspectorStore";
 
 export { useThemeStore, type ThemeMode } from "./themeStore";
 
+export { useGalleryRemixStore } from "./galleryRemixStore";
+
+export { useSlideSelectionStore } from "./slideSelectionStore";
+export type { TextStylePatch } from "./slideSelectionStore";
+
 class PageActiveStoreCompat {
   get pageActive() {
     return usePageActiveStore.getState().pageActive;

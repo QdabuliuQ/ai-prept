@@ -118,8 +118,15 @@ def _write_html_package(
     return out_dir
 
 
-def rematerialize_package_images(out_dir: Path) -> list[str]:
-    """仅补齐/重试配图，不重跑 LLM。用于 batch 隔离图片失败。"""
+def rematerialize_package_images(
+    out_dir: Path,
+    *,
+    force_files: set[str] | None = None,
+) -> list[str]:
+    """仅补齐/重试配图，不重跑 LLM。用于 batch 隔离图片失败。
+
+    force_files: 需要强制覆写的文件名集合；为空则只补缺失图。
+    """
     out_dir = out_dir.resolve()
     meta_path = out_dir / "template.json"
     if not meta_path.is_file():
@@ -136,6 +143,19 @@ def rematerialize_package_images(out_dir: Path) -> list[str]:
                 htmls.append(path.read_text(encoding="utf-8"))
 
     refs = collect_local_images(htmls)
+    force = {str(x) for x in (force_files or set()) if str(x).strip()}
+    if force:
+        forced: dict[str, str] = {}
+        for name in force:
+            forced[name] = refs.get(name) or name
+        # 仍带上同页其它缺失图，避免只强刷指定文件时漏补
+        for name, alt in refs.items():
+            dest = out_dir / "images" / name
+            if name in forced:
+                continue
+            if not dest.is_file():
+                forced[name] = alt
+        refs = forced
     theme_css = ""
     theme_path = out_dir / "theme.css"
     if theme_path.is_file():
@@ -159,6 +179,7 @@ def rematerialize_package_images(out_dir: Path) -> list[str]:
             style_hint=style_hint,
             bg_hex=theme_colors.get("bg"),
             theme_colors=theme_colors,
+            force=bool(force),
         )
         meta["usage"] = usage.merge_into(
             meta.get("usage") if isinstance(meta.get("usage"), dict) else None

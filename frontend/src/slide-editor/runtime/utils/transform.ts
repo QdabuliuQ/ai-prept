@@ -194,11 +194,11 @@ export function isSlideShellElement(
 }
 
 /**
- * Cards / layout containers with overflow:hidden clip relative-offset children.
- * Force ancestors (below slide root) to overflow:visible so drag stays visible.
+ * Cards / layout containers with overflow:hidden clip text glyphs and drag offsets.
+ * Force ancestors (below slide root) to overflow:visible.
  * Slide root / body / html keep their clip (1920×1080 canvas).
  */
-function releaseAncestorOverflow(element: HTMLElement): void {
+export function releaseAncestorOverflow(element: HTMLElement): void {
   const root = getSlideRoot();
   let node: HTMLElement | null = element.parentElement;
 
@@ -234,6 +234,15 @@ function releaseAncestorOverflow(element: HTMLElement): void {
   }
 }
 
+/** Unclip all text slots so glyphs aren't cut until the user drags. */
+export function releaseAllTextSlotOverflow(): void {
+  const root = getSlideRoot() || document;
+  const slots = root.querySelectorAll<HTMLElement>(
+    '[data-slot-type="text"], [data-slot]:not([data-slot-type="image"])',
+  );
+  slots.forEach((el) => releaseAncestorOverflow(el));
+}
+
 /**
  * Enter relative-offset mode once.
  * Origin must be derived from the *same* unrotated viewport box that selection
@@ -244,6 +253,10 @@ function releaseAncestorOverflow(element: HTMLElement): void {
  */
 function ensureRelativeOffsetMode(element: HTMLElement): void {
   if (element.getAttribute(ATTR_REL) === "true") return;
+
+  // Promote before measuring origin — inline boxes ignore transform and
+  // change metrics when switched to inline-block.
+  ensureTransformableDisplay(element);
 
   const cs = window.getComputedStyle(element);
   const pos = cs.position;
@@ -280,8 +293,18 @@ function ensureRelativeOffsetMode(element: HTMLElement): void {
   element.style.transformOrigin = "center center";
 }
 
+/** CSS transform does not apply to non-atomic `inline` — promote before rotate/move. */
+function ensureTransformableDisplay(element: HTMLElement): void {
+  const display = window.getComputedStyle(element).display;
+  if (display === "inline") {
+    element.style.display = "inline-block";
+  }
+}
+
 function applyRelativeBox(element: HTMLElement, box: ElementTransform): void {
   ensureRelativeOffsetMode(element);
+  // Also cover elements already in rel-mode from a prior move (still inline).
+  ensureTransformableDisplay(element);
   releaseAncestorOverflow(element);
 
   const originLeft = Number.parseFloat(
@@ -300,10 +323,6 @@ function applyRelativeBox(element: HTMLElement, box: ElementTransform): void {
   element.style.bottom = "auto";
 
   if (box.resize === true) {
-    const cs = window.getComputedStyle(element);
-    if (cs.display === "inline") {
-      element.style.display = "inline-block";
-    }
     element.style.width = `${Math.max(4, box.width)}px`;
     element.style.height = `${Math.max(4, box.height)}px`;
     element.style.boxSizing = "border-box";

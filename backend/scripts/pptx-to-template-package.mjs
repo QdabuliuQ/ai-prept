@@ -256,6 +256,69 @@ function writeHarness(tmpDir, rendererRelUrl) {
       }
     }
 
+    function plainText(el) {
+      return String(el.innerText || el.textContent || "").replace(/\\s+/g, " ").trim();
+    }
+
+    function maxFontPt(el) {
+      let best = null;
+      const nodes = [el, ...el.querySelectorAll("*")];
+      for (const n of nodes) {
+        const st = n.getAttribute?.("style") || n.style?.cssText || "";
+        const m = st.match(/font-size\\s*:\\s*([\\d.]+)\\s*pt/i);
+        if (m) best = Math.max(best || 0, parseFloat(m[1]));
+      }
+      return best;
+    }
+
+    function inferTextRole(text, fontPt) {
+      const n = text.length;
+      if (fontPt != null) {
+        if (fontPt >= 40 && n <= 60) return "heading";
+        if (fontPt >= 28 && n <= 100) return "lede";
+      }
+      if (n <= 24) return "meta";
+      if (n <= 80) return "heading";
+      return "body";
+    }
+
+    /** Tag absolute text boxes that plan matching missed (prefer outermost). */
+    function tagOrphanTextSlots(root) {
+      const cands = [...root.querySelectorAll("div")].filter((el) => {
+        if (el.hasAttribute("data-slot") || el.closest("[data-slot]")) return false;
+        if (el.querySelector("[data-slot]")) return false;
+        const pos = el.style?.position || "";
+        if (pos !== "absolute") return false;
+        if (!el.querySelector("span")) return false;
+        return plainText(el).length >= 1;
+      });
+      const outers = cands.filter(
+        (el) => !cands.some((other) => other !== el && other.contains(el)),
+      );
+      let textI = root.querySelectorAll("[data-slot-type='text']").length;
+      for (const el of outers) {
+        const text = plainText(el);
+        const fontPt = maxFontPt(el);
+        const role = inferTextRole(text, fontPt);
+        let slot;
+        if (role === "heading" || role === "page-title") {
+          slot = textI === 0 ? "title" : \`title-\${textI + 1}\`;
+        } else if (role === "lede") {
+          slot = textI === 0 ? "subtitle" : \`subtitle-\${textI + 1}\`;
+        } else if (role === "meta") {
+          slot = textI === 0 ? "eyebrow" : \`eyebrow-\${textI + 1}\`;
+        } else {
+          slot = \`body-\${textI + 1}\`;
+        }
+        applyAttrs(el, {
+          "data-slot": slot,
+          "data-slot-type": "text",
+          "data-slot-role": role === "heading" && textI === 0 ? "page-title" : role,
+        });
+        textI += 1;
+      }
+    }
+
     function parseRotateDeg(transform) {
       const t = String(transform || "");
       const m = t.match(/rotate\\(\\s*(-?[\\d.]+)\\s*deg\\s*\\)/i);
@@ -388,6 +451,7 @@ function writeHarness(tmpDir, rendererRelUrl) {
         let imgI = 0;
         for (const img of root.querySelectorAll("img")) {
           if (img.hasAttribute("data-slot")) continue;
+          if (img.closest("[data-slot]")) continue;
           imgI += 1;
           applyAttrs(img, {
             "data-slot": \`image-\${imgI}\`,
@@ -395,6 +459,9 @@ function writeHarness(tmpDir, rendererRelUrl) {
             "data-slot-role": imgI === 1 ? "hero-image" : "image",
           });
         }
+
+        // Fallback: nested absolute text boxes missed by coordinate match
+        tagOrphanTextSlots(root);
 
         return {
           width: presentation.width,
@@ -837,7 +904,7 @@ async function convertOnePptx(browser, baseUrl, pptxPath, args, serveRoot) {
         img.src = href;
         img.alt = "";
         img.style.cssText =
-          "width:100%;height:100%;object-fit:fill;display:block;border:0";
+          "width:100%;height:100%;object-fit:cover;display:block;border:0";
         const slotHost =
           (host && host.closest("[data-slot]")) || svg.closest("[data-slot]");
         if (slotHost) {
