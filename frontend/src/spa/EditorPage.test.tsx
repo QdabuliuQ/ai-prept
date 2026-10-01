@@ -24,6 +24,23 @@ describe("EditorPage", () => {
 
     expect(screen.getByTestId("app-shell").textContent).toBe("App shell");
     expect(appShellMock).toHaveBeenCalledTimes(1);
+    expect(appShellMock).toHaveBeenCalledWith({}, undefined);
+  });
+
+  it("renders the application shell without adding extra page markup", () => {
+    const { container } = render(<EditorPage />);
+
+    expect(container.firstElementChild).toHaveAttribute("data-testid", "app-shell");
+    expect(container.children).toHaveLength(1);
+    expect(appShellMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders again when the page is rerendered", () => {
+    const { rerender } = render(<EditorPage />);
+
+    rerender(<EditorPage />);
+
+    expect(appShellMock).toHaveBeenCalledTimes(2);
   });
 
   it("propagates an AppShell rendering error", () => {
@@ -35,6 +52,25 @@ describe("EditorPage", () => {
     });
 
     expect(() => render(<EditorPage />)).toThrow("AppShell failed to render");
+
+    consoleError.mockRestore();
+  });
+
+  it("propagates errors thrown by AppShell on a later render", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    appShellMock
+      .mockImplementationOnce(() => <div data-testid="app-shell">Ready</div>)
+      .mockImplementationOnce(() => {
+        throw new Error("AppShell failed after rerender");
+      });
+
+    const { rerender } = render(<EditorPage />);
+
+    expect(() => rerender(<EditorPage />)).toThrow(
+      "AppShell failed after rerender",
+    );
 
     consoleError.mockRestore();
   });
