@@ -202,16 +202,18 @@ export function GeneratePanel({
 
   // Radix Select 在 value 不在选项里时会显示空白；切换供应商或目录刷新后对齐
   useEffect(() => {
-    if (!modelOptions.length) return;
-    if (modelOptions.some((m) => m.id === llmModel)) return;
-    setLlmModel(modelOptions[0].id);
-  }, [llmProvider, llmModel, modelOptions]);
+    const options = selectedProvider?.models || [];
+    if (!options.length) return;
+    if (options.some((m) => m.id === llmModel)) return;
+    setLlmModel(options[0].id);
+  }, [llmProvider, llmModel, selectedProvider]);
 
   useEffect(() => {
-    if (!imageModelOptions.length) return;
-    if (imageModelOptions.some((m) => m.id === imageModel)) return;
-    setImageModel(imageModelOptions[0].id);
-  }, [imageProvider, imageModel, imageModelOptions]);
+    const options = selectedImageProvider?.models || [];
+    if (!options.length) return;
+    if (options.some((m) => m.id === imageModel)) return;
+    setImageModel(options[0].id);
+  }, [imageProvider, imageModel, selectedImageProvider]);
 
   const onProviderChange = (id: string) => {
     setLlmProvider(id);
