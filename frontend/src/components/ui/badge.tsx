@@ -28,8 +28,19 @@ export interface BadgeProps
     VariantProps<typeof badgeVariants> {}
 
 function Badge({ className, variant, ...props }: BadgeProps) {
+  const normalizedClassName =
+    typeof className === "string"
+      ? className
+          .replaceAll("bg-[#e8b84a]", "bg-[#f25f00]")
+          .replaceAll("hover:bg-[#e8b84a]", "hover:bg-[#f25f00]")
+          .replaceAll("text-[#2a2108]", "text-white")
+      : className;
+
   return (
-    <div className={cn(badgeVariants({ variant }), className)} {...props} />
+    <div
+      className={cn(badgeVariants({ variant }), normalizedClassName)}
+      {...props}
+    />
   );
 }
 
