@@ -17,6 +17,8 @@ export type TemplateSummary = {
   render?: string;
   /** true = 未能转为标准 html-slide，仅为 SVG 兜底包 */
   htmlConvertFailed?: boolean;
+  /** true = 仅有 source.pptx，等待浏览器转 HTML */
+  htmlConvertNeeded?: boolean;
   reviewNote?: string | null;
   status: TemplateStatus;
   storageBackend: string;
@@ -92,6 +94,8 @@ export type GenerateJob = {
   templateIds?: string[];
   /** PPTX 已就绪，等待浏览器 PPTX→HTML */
   needsBrowserConvert?: boolean;
+  /** Multi-pack: templates still needing browser convert (FIFO). */
+  pendingConvertIds?: string[];
   pptxPath?: string;
   convertTemplateId?: string;
   llmProvider?: string;

@@ -623,6 +623,14 @@ async function convertOnePptx(browser, baseUrl, pptxPath, args, serveRoot) {
   /** 重转同一 id 时保留 visual-spec / 审核元数据，避免准备上传再被「缺设计规范」拦住 */
   let preservedSpec = null;
   let preservedMeta = null;
+
+  // Stage PPTX first: in-place --pptx agent-output/<id>/source.pptx would vanish
+  // if we rmSync(outDir) before copying.
+  const pptxServeName = `input-${cryptoRandom()}.pptx`;
+  const stagedPptx = path.join(serveRoot, pptxServeName);
+  fs.copyFileSync(pptxPath, stagedPptx);
+  const resolvedSource = stagedPptx;
+
   if (fs.existsSync(outDir)) {
     const specPath = path.join(outDir, "visual-spec.md");
     try {
@@ -645,10 +653,8 @@ async function convertOnePptx(browser, baseUrl, pptxPath, args, serveRoot) {
   }
   fs.mkdirSync(path.join(outDir, "images"), { recursive: true });
   fs.mkdirSync(path.join(outDir, "slides"), { recursive: true });
-
-  // Serve PPTX over HTTP (avoid huge base64 in CDP evaluate)
-  const pptxServeName = `input-${cryptoRandom()}.pptx`;
-  fs.copyFileSync(pptxPath, path.join(serveRoot, pptxServeName));
+  // Keep a local source.pptx so Admin can re-convert / browser-convert later.
+  fs.copyFileSync(resolvedSource, path.join(outDir, "source.pptx"));
 
   const page = await browser.newPage();
   await page.setViewport({
@@ -665,7 +671,7 @@ async function convertOnePptx(browser, baseUrl, pptxPath, args, serveRoot) {
   });
 
   const zipLimits = zipLimitsFromArgs(args);
-  const pictureClipsBySlide = await loadPictureClipsBySlide(pptxPath);
+  const pictureClipsBySlide = await loadPictureClipsBySlide(resolvedSource);
   const meta = await page.evaluate(
     async (pptxUrl, limits) => {
       const res = await fetch(pptxUrl);
@@ -936,6 +942,129 @@ async function convertOnePptx(browser, baseUrl, pptxPath, args, serveRoot) {
       );
     }
 
+    // Gradient text (background-clip:text) is fragile in the editor — rasterize to PNG.
+    const gradCount = await page.evaluate(() => {
+      const root = document.querySelector("#mount .pptx-slide-root");
+      if (!root) return 0;
+      const isGradText = (el) => {
+        if (!el || el.nodeType !== 1) return false;
+        const st = window.getComputedStyle(el);
+        const styleAttr = el.getAttribute("style") || "";
+        const hasGrad =
+          /linear-gradient/i.test(st.backgroundImage || "") ||
+          /linear-gradient/i.test(styleAttr);
+        if (!hasGrad) return false;
+        const clip =
+          `${st.webkitBackgroundClip || ""} ${st.backgroundClip || ""}`.toLowerCase();
+        const clipped =
+          clip.includes("text") ||
+          /background-clip\s*:\s*text/i.test(styleAttr) ||
+          /-\s*webkit-background-clip\s*:\s*text/i.test(styleAttr) ||
+          /background\s*:[^;]*\btext\b/i.test(styleAttr) ||
+          ((st.color === "transparent" || st.color === "rgba(0, 0, 0, 0)") &&
+            hasGrad);
+        if (!clipped) return false;
+        return (el.innerText || el.textContent || "").trim().length > 0;
+      };
+      const cands = [
+        ...root.querySelectorAll("span, p, div, h1, h2, h3, h4, h5, h6"),
+      ].filter(isGradText);
+      const leaves = cands.filter(
+        (el) => !cands.some((other) => other !== el && el.contains(other)),
+      );
+      leaves.forEach((el, i) => {
+        el.setAttribute("data-pptx-gradient-text", "1");
+        el.setAttribute("data-pptx-gradient-text-i", String(i));
+      });
+      return leaves.length;
+    });
+
+    if (gradCount > 0) {
+      const handles = await page.$$(
+        `#mount .pptx-slide-root [data-pptx-gradient-text='1']`,
+      );
+      const replacements = [];
+      for (let gi = 0; gi < handles.length; gi++) {
+        const el = handles[gi];
+        const file = `${layout}-gradtext-${gi + 1}.png`;
+        const abs = path.join(outDir, "images", file);
+        try {
+          await el.screenshot({
+            path: abs,
+            type: "png",
+            omitBackground: true,
+          });
+          const box = await el.evaluate((node) => {
+            const root = document.querySelector("#mount .pptx-slide-root");
+            const rr = node.getBoundingClientRect();
+            const br = root.getBoundingClientRect();
+            const slotHost = node.closest("[data-slot]") || node;
+            return {
+              left: rr.left - br.left,
+              top: rr.top - br.top,
+              width: Math.max(1, rr.width),
+              height: Math.max(1, rr.height),
+              slot: slotHost.getAttribute("data-slot") || "",
+              slotRole: slotHost.getAttribute("data-slot-role") || "heading",
+              text: (node.innerText || node.textContent || "")
+                .trim()
+                .slice(0, 80),
+            };
+          });
+          replacements.push({
+            index: gi,
+            src: `../images/${file}`,
+            ...box,
+          });
+        } catch (e) {
+          warnings.push(
+            `${layout}: gradient-text screenshot failed (#${gi + 1}): ${
+              e.message || e
+            }`,
+          );
+        }
+      }
+      if (replacements.length) {
+        await page.evaluate((reps) => {
+          const root = document.querySelector("#mount .pptx-slide-root");
+          if (!root) return;
+          const cs = window.getComputedStyle(root);
+          if (cs.position === "static") root.style.position = "relative";
+          for (const rep of reps) {
+            const el = root.querySelector(
+              `[data-pptx-gradient-text-i="${rep.index}"]`,
+            );
+            if (!el) continue;
+            const host = el.closest("[data-slot]") || el;
+            const img = document.createElement("img");
+            img.src = rep.src;
+            img.alt = rep.text || "";
+            img.setAttribute("data-element", "image");
+            img.setAttribute("data-slot-type", "image");
+            img.setAttribute("data-slot-role", rep.slotRole || "heading");
+            if (rep.slot) img.setAttribute("data-slot", rep.slot);
+            img.style.cssText = [
+              "position:absolute",
+              `left:${Number(rep.left.toFixed(2))}px`,
+              `top:${Number(rep.top.toFixed(2))}px`,
+              `width:${Number(rep.width.toFixed(2))}px`,
+              `height:${Number(rep.height.toFixed(2))}px`,
+              "object-fit:contain",
+              "display:block",
+              "border:0",
+              "margin:0",
+              "padding:0",
+              "pointer-events:auto",
+            ].join(";");
+            root.appendChild(img);
+            if (host && host !== root) host.remove();
+            else el.remove();
+          }
+        }, replacements);
+        warnings.push(`${layout}: 渐变字降级为图片 ×${replacements.length}`);
+      }
+    }
+
     let rawHtml = await page.evaluate(
       (layoutId) => window.__pptxConvert.exportScaledHtml(layoutId),
       layout,
@@ -974,7 +1103,7 @@ async function convertOnePptx(browser, baseUrl, pptxPath, args, serveRoot) {
     /* ignore */
   }
 
-  const relSource = path.relative(REPO_ROOT, pptxPath) || pptxPath;
+  const relSource = `agent-output/${templateId}/source.pptx`;
   const status = defaultStatus(args.outRoot, args.status);
   const written = writeTemplatePackage({
     outDir,

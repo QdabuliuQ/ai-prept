@@ -275,14 +275,26 @@ def image_api_config() -> ImageApiConfig:
         else:
             transport = "openai-images"
     # 已配置 IMAGE_* 时不再合并 OPENAI_API_KEY，避免 IDE/shell 里过期兜底 key 污染轮询池。
-    dedicated = parse_api_keys(
-        os.environ.get("IMAGE_API_KEYS"),
-        os.environ.get("IMAGE_API_KEY"),
-        os.environ.get("POLLINATIONS_API_KEYS") if provider == "pollinations" else None,
-        os.environ.get("POLLINATIONS_API_KEY") if provider == "pollinations" else None,
-        os.environ.get("SILICONFLOW_API_KEYS") if provider == "siliconflow" else None,
-        os.environ.get("SILICONFLOW_API_KEY") if provider == "siliconflow" else None,
-    )
+    # 硅基流动只用 SILICONFLOW_*；勿并入 Maizi/OpenAI 的 IMAGE_API_KEY（否则会 401 Token invalid）。
+    if provider == "siliconflow" or transport == "siliconflow-images":
+        dedicated = parse_api_keys(
+            os.environ.get("SILICONFLOW_API_KEYS"),
+            os.environ.get("SILICONFLOW_API_KEY"),
+        ) or parse_api_keys(
+            os.environ.get("IMAGE_API_KEYS"),
+            os.environ.get("IMAGE_API_KEY"),
+        )
+    else:
+        dedicated = parse_api_keys(
+            os.environ.get("IMAGE_API_KEYS"),
+            os.environ.get("IMAGE_API_KEY"),
+            os.environ.get("POLLINATIONS_API_KEYS")
+            if provider == "pollinations"
+            else None,
+            os.environ.get("POLLINATIONS_API_KEY")
+            if provider == "pollinations"
+            else None,
+        )
     keys = dedicated or parse_api_keys(os.environ.get("OPENAI_API_KEY"))
     default_base = ""
     if transport == "pollinations-get":
@@ -351,14 +363,13 @@ def siliconflow_fallback_config(
     keys = parse_api_keys(
         os.environ.get("SILICONFLOW_API_KEYS"),
         os.environ.get("SILICONFLOW_API_KEY"),
-        # 主线路已是 siliconflow 时 keys 可能只在 IMAGE_API_KEYS
-        os.environ.get("IMAGE_API_KEYS")
-        if primary is not None and primary.transport == "siliconflow-images"
-        else None,
-        os.environ.get("IMAGE_API_KEY")
-        if primary is not None and primary.transport == "siliconflow-images"
-        else None,
     )
+    # 仅当未配置 SILICONFLOW_*、且主线路已是硅基（key 写在 IMAGE_*）时才回退读 IMAGE_*
+    if not keys and primary is not None and primary.transport == "siliconflow-images":
+        keys = parse_api_keys(
+            os.environ.get("IMAGE_API_KEYS"),
+            os.environ.get("IMAGE_API_KEY"),
+        )
     if not keys:
         return None
     model = (
@@ -839,6 +850,32 @@ def build_image_prompt(
     return f"{lock}{body}"
 
 
+def build_regen_image_prompt(
+    *,
+    subject: str,
+    aspect: str | None = None,
+    style_hint: str = "",
+) -> str:
+    """Editor 显式换图：主体优先。subject 应由规划层给出纯画面描述。"""
+    subj = re.sub(r"\s+", " ", (subject or "").strip()) or "scene"
+    ratio = normalize_image_size(aspect)
+    style = re.sub(r"\s+", " ", (style_hint or "").strip())[:80]
+    mood = (
+        f" Softly compatible with deck mood ({style}) only if it does not change the subject."
+        if style
+        else ""
+    )
+    return (
+        f"PRIMARY REQUIREMENT — depict EXACTLY this scene, nothing else: {subj}. "
+        f"Photorealistic full-bleed photograph, canvas {ratio}, edge-to-edge. "
+        "Include the requested people/objects clearly and prominently. "
+        "Do NOT substitute architecture, empty courtyards, housing blocks, landscapes, "
+        "or abstract patterns for the requested subject. "
+        "No text, logos, watermarks, UI chrome, frames, or letterboxing."
+        f"{mood}"
+    )
+
+
 def estimate_inset_matte_ratio(data: bytes, *, dark_thresh: int = 90) -> float:
     """粗测「深灰垫底 + 小图嵌套」失败：近均匀深灰像素占比（0~1）。"""
     try:
@@ -1273,12 +1310,16 @@ def materialize_images(
     theme_colors: dict[str, str] | None = None,
     concurrency: int | None = None,
     force: bool = False,
+    prompt_mode: str = "deck",
 ) -> list[str]:
     """按 HTML/规划引用生成/补齐 images/；返回警告列表。失败只写占位，不抛异常。
 
     refs 值可为 str（提示词，比例用全局默认）或
     ``{"prompt": "...", "size": "1:1"|"16:9"|...}``（按槽位比例生图）。
     force=True 时即使已有真实图片也会重新生成（覆写），避免先删后写造成预览 404。
+    prompt_mode:
+      - ``deck``：整册风格锁 + 材质锁（remix / 批量生图）
+      - ``subject``：编辑器显式换图，主体描述优先
     """
     warnings: list[str] = []
     if not refs:
@@ -1388,13 +1429,21 @@ def materialize_images(
             if not can_generate and not sf_fallback:
                 dest.write_bytes(create_solid_color_png(ph_w, ph_h, (180, 180, 185)))
                 return f"跳过生图，占位: {filename} ({size})"
-            prompt = build_image_prompt(
-                filename=filename,
-                alt=alt,
-                style_hint=style_hint,
-                bg_hex=bg_hex,
-                material_lock=material_lock,
-                aspect=size,
+            prompt = (
+                build_regen_image_prompt(
+                    subject=alt,
+                    aspect=size,
+                    style_hint=style_hint,
+                )
+                if str(prompt_mode or "deck").strip().lower() == "subject"
+                else build_image_prompt(
+                    filename=filename,
+                    alt=alt,
+                    style_hint=style_hint,
+                    bg_hex=bg_hex,
+                    material_lock=material_lock,
+                    aspect=size,
+                )
             )
 
             def _write_ok(data: bytes, *, via: str) -> None:

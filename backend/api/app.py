@@ -50,9 +50,10 @@ def create_app() -> FastAPI:
             return JSONResponse(exc.detail, status_code=exc.status_code)
         return JSONResponse({"error": str(exc.detail)}, status_code=exc.status_code)
 
-    from api.routes import files, gallery, generate, llm, prompt, styles, templates
+    from api.routes import editor, files, gallery, generate, llm, prompt, styles, templates
 
     app.include_router(gallery.router)
+    app.include_router(editor.router)
     app.include_router(templates.router)
     app.include_router(generate.router)
     app.include_router(llm.router)

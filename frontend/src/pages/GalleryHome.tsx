@@ -75,7 +75,7 @@ type GalleryModelPrefs = {
 const GALLERY_MODEL_PREFS_KEY = "webppt:gallery-model-prefs";
 
 const dockSelectTriggerClass =
-  "h-8 w-auto max-w-[10.5rem] shrink-0 gap-1 rounded-full border-0 bg-white/10 px-3 text-[11px] font-medium text-white/85 shadow-none ring-1 ring-white/12 hover:bg-white/14 hover:text-white focus:ring-2 focus:ring-white/35 disabled:opacity-50 [&>span]:line-clamp-1 [&>svg]:size-3 [&>svg]:opacity-60";
+  "h-8 w-auto max-w-[10.5rem] shrink-0 gap-1 rounded-full border border-white/15 bg-white/10 px-3 text-[11px] font-medium text-white/85 shadow-none outline-none ring-0 ring-offset-0 hover:bg-white/14 hover:text-white hover:border-white/25 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:border-white/40 data-[state=open]:ring-0 data-[state=open]:border-white/40 disabled:opacity-50 [&>span]:line-clamp-1 [&>svg]:size-3 [&>svg]:opacity-60";
 
 const dockSelectContentClass =
   "z-[80] max-h-72 border-white/10 bg-[#1a1917] text-white shadow-[0_16px_48px_rgba(0,0,0,0.55)]";
@@ -384,7 +384,7 @@ function expandTemplates(source: GalleryTemplate[]): GalleryTemplate[] {
     out.push({
       ...base,
       id: `${base.id}__mock_${i}`,
-      title: i < source.length ? base.title : `${base.title} · ${i + 1}`,
+      title: base.title,
     });
   }
   return out;

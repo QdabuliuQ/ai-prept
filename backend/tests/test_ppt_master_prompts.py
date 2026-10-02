@@ -119,7 +119,7 @@ def test_fusion_and_repair_followups_are_compact() -> None:
 
 
 def test_slide_concurrency_defaults_and_cap() -> None:
-    assert _resolve_slide_concurrency(None, 7) == 6
+    assert _resolve_slide_concurrency(None, 7) == 3
     assert _resolve_slide_concurrency(4, 7) == 4
     assert _resolve_slide_concurrency(99, 7) == 7
     assert _resolve_slide_concurrency(99, 20) == 8

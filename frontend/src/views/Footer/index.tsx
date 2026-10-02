@@ -19,6 +19,7 @@ import {
   useRemarkEditActiveStore,
 } from "@/store";
 import {
+  Aiming,
   Column,
   Down,
   Notes,
@@ -50,6 +51,7 @@ const FooterComponent: FC = () => {
   const enterFullscreen = useFullscreenStore((state) => state.enterFullscreen);
   const zoomPercent = useCanvasZoomStore((state) => state.zoomPercent);
   const setZoomPercent = useCanvasZoomStore((state) => state.setZoomPercent);
+  const resetViewport = useCanvasZoomStore((state) => state.resetViewport);
 
   const pageIndex = pages.findIndex((p) => p.id === pageActive);
 
@@ -220,6 +222,25 @@ const FooterComponent: FC = () => {
                 aria-label="zoom"
               />
               <span className={styles.zoomLabel}>{zoomPercent}%</span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    className={styles.viewBtn}
+                    onClick={resetViewport}
+                    aria-label={t("footer.resetViewport")}
+                  >
+                    <Aiming
+                      theme="outline"
+                      size="15"
+                      fill="var(--text-secondary)"
+                    />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {t("footer.resetViewport")}
+                </TooltipContent>
+              </Tooltip>
             </div>
           </>
         )}

@@ -21,9 +21,11 @@ import {
   useSlideSelectionStore,
 } from "@/store";
 import type { Page } from "@/store/ppt";
+import { getCachedThumbnail } from "@/utils/pageThumbnail";
 import {
   type CSSProperties,
   type FC,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -48,8 +50,11 @@ export type HtmlSlideFrameProps = {
   editable?: boolean;
 };
 
+type Slot = 0 | 1;
+
 /**
  * 用项目内路由 /embed/slide 嵌入幻灯片页（不用 srcdoc）。
+ * 双缓冲：新页在背后加载完再切前景，并用缩略图垫底，减轻切页闪烁。
  */
 export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
   page,
@@ -63,16 +68,28 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
 }) => {
   const tokenRef = useRef("");
   const lastSrcRef = useRef("");
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const iframeRefs = useRef<[HTMLIFrameElement | null, HTMLIFrameElement | null]>([
+    null,
+    null,
+  ]);
   const bridgeRef = useRef<SlideEditorParentBridge | null>(null);
   const skipNextHtmlReloadRef = useRef(false);
-  const [src, setSrc] = useState("");
+  const pendingSlotRef = useRef<Slot | null>(null);
+  const pendingSrcRef = useRef("");
+  const activeSlotRef = useRef<Slot>(0);
+  const paintedRef = useRef(false);
+
+  const [slotSrc, setSlotSrc] = useState<[string, string]>(["", ""]);
+  const [activeSlot, setActiveSlot] = useState<Slot>(0);
+  const [painted, setPainted] = useState(false);
+  const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [editorReady, setEditorReady] = useState(false);
   const [hoverRect, setHoverRect] = useState<SlideRect | null>(null);
   const [selected, setSelected] = useState<SelectedElementInfo | null>(null);
   const [multiSelected, setMultiSelected] = useState<SelectedElementInfo[]>(
     [],
   );
+
   const setPageHtml = usePPTStore((s) => s.setPageHtml);
   const setSlideSelected = useSlideSelectionStore((s) => s.setSelected);
   const clearSlideSelection = useSlideSelectionStore((s) => s.clearSelection);
@@ -81,6 +98,49 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
   const useDesign = fit === "design";
   const scale = useDesign ? 1 : SLIDE_HTML_SCALE;
   const transformingRef = useRef(false);
+
+  activeSlotRef.current = activeSlot;
+  paintedRef.current = painted;
+
+  const bindActiveIframe = useCallback(() => {
+    if (!editable || !bridgeRef.current) return;
+    const el = iframeRefs.current[activeSlotRef.current];
+    bridgeRef.current.setIframe(el);
+    void bridgeRef.current.enterSelectionMode().catch(() => undefined);
+  }, [editable]);
+
+  /** 空闲槽加载 next；已有前景时不打断当前画面 */
+  const pushSrc = useCallback((next: string) => {
+    if (!next || next === lastSrcRef.current) return;
+    lastSrcRef.current = next;
+
+    setSlotSrc((prev) => {
+      const front = activeSlotRef.current;
+      const hasPaintedFront = paintedRef.current && Boolean(prev[front]);
+
+      if (!hasPaintedFront) {
+        pendingSlotRef.current = 0;
+        pendingSrcRef.current = next;
+        return [next, ""];
+      }
+
+      const back = (1 - front) as Slot;
+      pendingSlotRef.current = back;
+      pendingSrcRef.current = next;
+      const nextSlots: [string, string] = [prev[0], prev[1]];
+      nextSlots[back] = next;
+      return nextSlots;
+    });
+  }, []);
+
+  const promoteSlot = useCallback((slot: Slot) => {
+    if (pendingSlotRef.current !== slot || !pendingSrcRef.current) return;
+    pendingSlotRef.current = null;
+    pendingSrcRef.current = "";
+    setActiveSlot(slot);
+    setPainted(true);
+    setCoverUrl(null);
+  }, []);
 
   const persistHtml = async (htmlFromEvent?: string) => {
     try {
@@ -96,21 +156,20 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     }
   };
 
-  // 切换 / 挂载页面：申请租约并立即加载（layout 阶段，赶在 iframe 请求前）
   useLayoutEffect(() => {
     const token = acquireSlideEmbedAccess(page.id, page.html);
     tokenRef.current = token;
     const next = buildSlideEmbedSrc(page.id, page.html, token, {
       edit: editable,
     });
-    lastSrcRef.current = next;
-    setSrc(next);
+
+    setCoverUrl(getCachedThumbnail(page.id));
+    pushSrc(next);
     setHoverRect(null);
     setSelected(null);
     setMultiSelected([]);
     setEditorReady(false);
     transformingRef.current = false;
-    // Only the editor canvas owns the shared selection store.
     if (editable) clearSlideSelection();
 
     return () => {
@@ -119,7 +178,6 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page.id, editable]);
 
-  // 同页 HTML 变更：防抖刷新（本帧写回 store 时跳过，避免打断编辑）
   useEffect(() => {
     const token = tokenRef.current;
     if (!token) return;
@@ -139,8 +197,7 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     if (next === lastSrcRef.current) return;
 
     const timer = window.setTimeout(() => {
-      lastSrcRef.current = next;
-      setSrc(next);
+      pushSrc(next);
       setHoverRect(null);
       setSelected(null);
       setMultiSelected([]);
@@ -148,16 +205,13 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     }, reloadDebounceMs);
 
     return () => window.clearTimeout(timer);
-  }, [page.html, page.id, reloadDebounceMs, editable]);
+  }, [page.html, page.id, reloadDebounceMs, editable, pushSrc]);
 
-  // Parent bridge for editable mode
   useEffect(() => {
     if (!editable) {
       bridgeRef.current?.destroy();
       bridgeRef.current = null;
       setEditorReady(false);
-      // Previews share the global selection store with the editor canvas —
-      // never clear selection / text API from a non-editable mount.
       return;
     }
 
@@ -188,6 +242,7 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     });
     bridgeRef.current = bridge;
     setEditorReady(false);
+    bridge.setIframe(iframeRefs.current[activeSlotRef.current]);
 
     bindTextApi({
       applyTextStyle: async (patch, target) => {
@@ -202,7 +257,6 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     });
 
     return () => {
-      // Only the editable owner may tear down the shared text API / selection.
       bindTextApi(null);
       clearSlideSelection();
       bridge.destroy();
@@ -213,16 +267,17 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
   }, [editable, page.id]);
 
   useEffect(() => {
-    if (!editable || !bridgeRef.current) return;
-    bridgeRef.current.setIframe(iframeRef.current);
-  }, [editable, src, editorReady]);
+    bindActiveIframe();
+  }, [bindActiveIframe, activeSlot, editorReady]);
 
-  const handleIframeLoad = () => {
+  const handleSlotLoad = (slot: Slot) => {
+    promoteSlot(slot);
     if (!editable || !bridgeRef.current) return;
-    bridgeRef.current.setIframe(iframeRef.current);
-    void bridgeRef.current.enterSelectionMode().catch(() => {
-      /* runtime not ready yet — EDITOR_READY will retry */
-    });
+    // promote 后下一帧 activeSlot 才更新；若正是当前 pending 晋升目标，立刻绑
+    if (pendingSlotRef.current === null) {
+      bridgeRef.current.setIframe(iframeRefs.current[slot]);
+      void bridgeRef.current.enterSelectionMode().catch(() => undefined);
+    }
   };
 
   const handleTransformStart = () => {
@@ -274,7 +329,6 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     },
     editorId?: string,
   ) => {
-    // Click-without-drag (text edit): just reopen selection events
     if (!transformingRef.current) {
       bridgeRef.current?.setSuppressSelectionEvents(false);
       return;
@@ -291,6 +345,19 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
     }
   };
 
+  const iframeBaseStyle: CSSProperties = {
+    border: 0,
+    display: "block",
+    width: SLIDE_HTML_WIDTH,
+    height: SLIDE_HTML_HEIGHT,
+    transform: useDesign ? undefined : `scale(${SLIDE_HTML_SCALE})`,
+    transformOrigin: "top left",
+    background: "#ffffff",
+    position: "absolute",
+    top: 0,
+    left: 0,
+  };
+
   return (
     <div
       className={className}
@@ -298,28 +365,54 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
         position: "absolute",
         inset: 0,
         overflow: "hidden",
+        background: "#ffffff",
         ...style,
       }}
     >
-      {src ? (
-        <iframe
-          ref={iframeRef}
-          title={title || `slide-${page.id}`}
-          src={src}
-          sandbox="allow-scripts allow-same-origin"
-          className={pointerEventsNone ? "pointer-events-none" : undefined}
-          onLoad={editable ? handleIframeLoad : undefined}
+      {coverUrl ? (
+        <img
+          src={coverUrl}
+          alt=""
+          draggable={false}
+          aria-hidden
           style={{
-            border: 0,
-            display: "block",
-            width: SLIDE_HTML_WIDTH,
-            height: SLIDE_HTML_HEIGHT,
-            transform: useDesign ? undefined : `scale(${SLIDE_HTML_SCALE})`,
-            transformOrigin: "top left",
-            background: "transparent",
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "fill",
+            zIndex: 0,
+            pointerEvents: "none",
           }}
         />
       ) : null}
+
+      {([0, 1] as Slot[]).map((slot) => {
+        const src = slotSrc[slot];
+        if (!src) return null;
+        const isActive = painted && slot === activeSlot;
+        return (
+          <iframe
+            key={slot}
+            ref={(el) => {
+              iframeRefs.current[slot] = el;
+            }}
+            title={title || `slide-${page.id}-${slot}`}
+            src={src}
+            sandbox="allow-scripts allow-same-origin"
+            className={
+              pointerEventsNone || !isActive ? "pointer-events-none" : undefined
+            }
+            onLoad={() => handleSlotLoad(slot)}
+            style={{
+              ...iframeBaseStyle,
+              zIndex: isActive ? 2 : 1,
+              opacity: isActive ? 1 : 0,
+            }}
+          />
+        );
+      })}
+
       {editable && !useDesign && (
         <div
           className="absolute top-0 left-0 overflow-visible"
@@ -327,6 +420,7 @@ export const HtmlSlideFrame: FC<HtmlSlideFrameProps> = ({
             width: SLIDE_HTML_WIDTH * scale,
             height: SLIDE_HTML_HEIGHT * scale,
             pointerEvents: "none",
+            zIndex: 3,
           }}
         >
           <SelectionOverlay

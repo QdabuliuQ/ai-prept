@@ -111,8 +111,20 @@ export function getUnrotatedViewportBox(element: HTMLElement | SVGSVGElement): {
   rotation: number;
 } {
   const el = element as HTMLElement;
-  const { scaleX, scaleY } = extractTransformScale(el);
+  const rotation = extractRotationDeg(el);
   const boundingRect = element.getBoundingClientRect();
+  // Unrotated: trust viewport AABB (matches ink + letter-spacing). Mixing
+  // offsetWidth with a scaled/rotated AABB center is what shifts the overlay.
+  if (Math.abs(rotation) < 0.01) {
+    return {
+      left: boundingRect.left,
+      top: boundingRect.top,
+      width: boundingRect.width,
+      height: boundingRect.height,
+      rotation: 0,
+    };
+  }
+  const { scaleX, scaleY } = extractTransformScale(el);
   const ow = element instanceof HTMLElement ? element.offsetWidth : 0;
   const oh = element instanceof HTMLElement ? element.offsetHeight : 0;
   const width = ow > 0 ? ow * scaleX : boundingRect.width;
@@ -124,7 +136,7 @@ export function getUnrotatedViewportBox(element: HTMLElement | SVGSVGElement): {
     top: centerY - height / 2,
     width,
     height,
-    rotation: extractRotationDeg(el),
+    rotation,
   };
 }
 
@@ -356,6 +368,16 @@ export function applyElementTransform(
     return;
   }
   applyRelativeBox(element as HTMLElement, box);
+}
+
+/**
+ * Bake relative left/top (and promote inline → inline-block) *before* selection
+ * geometry is reported. Otherwise the first drag mutates layout metrics and the
+ * orange overlay drifts from the text ink.
+ */
+export function prepareElementForEditorTransform(element: HTMLElement): void {
+  if (isSlideShellElement(element)) return;
+  ensureRelativeOffsetMode(element);
 }
 
 export const EDITOR_TRANSFORM_ATTRS = [

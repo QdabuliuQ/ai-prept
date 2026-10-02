@@ -56,7 +56,7 @@ import {
   previewBlobsToPayload,
 } from "@/utils/templatePreviewCapture";
 import type { TemplateFormat } from "@/types/templateFormat";
-import { adminFetch } from "./api";
+import { adminFetch, adminFetchBinary } from "./api";
 import {
   AdminSlideFrame,
   formatCny,
@@ -69,6 +69,7 @@ import {
   useConfirmDialog,
 } from "./shared";
 import type { TemplateStatus, TemplateSummary } from "./types";
+import { pptxBrowserConvert } from "@/utils/pptxBrowserConvert";
 
 const PAGE_SIZE = 10;
 
@@ -650,10 +651,47 @@ export function TemplatesPanel({
         );
       toast.error(
         isChunk
-          ? "导出模块加载失败（开发态分包未就绪）。请硬刷新后重试。"
-          : msg,
+          ? "导出模块加载失败，请硬刷新页面后重试"
+          : msg || "导出失败",
         { id: key },
       );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const convertHtmlPackage = async (row: TemplateSummary) => {
+    const id = row.id;
+    setBusy({ id, action: "convert-html" });
+    const key = `convert-html-${id}`;
+    toast.loading(`浏览器转换中… ${id}`, { id: key });
+    try {
+      const buffer = await adminFetchBinary(
+        `/api/admin/templates/${encodeURIComponent(id)}/source.pptx`,
+      );
+      const labelZh = String(row.label?.zh_CN || row.label?.en_US || "").trim();
+      const result = await pptxBrowserConvert(buffer, {
+        labelZh: labelZh && labelZh !== id ? labelZh : id,
+      });
+      await adminFetch(
+        `/api/admin/templates/${encodeURIComponent(id)}/import-html-package`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            labelZh: labelZh && labelZh !== id ? labelZh : undefined,
+            slides: result.slides,
+            images: result.images,
+            warnings: result.warnings,
+            theme: result.theme,
+          }),
+        },
+      );
+      toast.success(`HTML 转换完成：${id}（${result.slides.length} 页）`, {
+        id: key,
+      });
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : String(e), { id: key });
     } finally {
       setBusy(null);
     }
@@ -1390,6 +1428,24 @@ export function TemplatesPanel({
                           >
                             预览
                           </LoadingButton>
+                          {row.htmlConvertNeeded ||
+                          (row.slideCount === 0 &&
+                            row.render === "svg" &&
+                            !row.htmlConvertFailed) ? (
+                            <LoadingButton
+                              size="sm"
+                              variant="default"
+                              loading={isBusy(row.id, "convert-html")}
+                              disabled={
+                                rowBusy(row.id) &&
+                                !isBusy(row.id, "convert-html")
+                              }
+                              title="用浏览器把 source.pptx 转成可编辑 HTML 页"
+                              onClick={() => void convertHtmlPackage(row)}
+                            >
+                              转 HTML
+                            </LoadingButton>
+                          ) : null}
                           <LoadingButton
                             size="sm"
                             variant="outline"

@@ -2,9 +2,6 @@ import {
   PanelLargeButton,
   PanelSplitLine,
 } from "@/components";
-import ThemePalettePanel, {
-  THEME_PANEL_SECTION_KEY,
-} from "@/components/ThemePalettePanel";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,14 +18,12 @@ import {
   usePPTStore,
   usePageActiveStore,
 } from "@/store";
-import { useChartInspectorStore } from "@/store/zustand/chartInspectorStore";
 import {
   addPageAndActivate,
   duplicatePageAndActivate,
 } from "@/utils/operate";
 import {
   Add,
-  ColorCard,
   Column,
   Copy,
   Delete,
@@ -40,7 +35,7 @@ import { useMemoizedFn } from "ahooks";
 import { useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 
-/** 页面面板：主题 / 画布管理 / 视图切换 */
+/** 页面面板：画布管理 / 视图切换 */
 export const Start: FC = () => {
   const { t } = useTranslation();
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -54,9 +49,6 @@ export const Start: FC = () => {
   const displayStatus = useDisplayStatusStore((state) => state.displayStatus);
   const setDisplayStatus = useDisplayStatusStore(
     (state) => state.setDisplayStatus,
-  );
-  const toggleThemeSection = useChartInspectorStore(
-    (state) => state.toggleSection,
   );
 
   const currentPage = pageActive ? getActivePage(pageActive) : null;
@@ -91,18 +83,6 @@ export const Start: FC = () => {
 
   return (
     <div className="flex h-[53px] items-center gap-[10px]">
-      <ThemePalettePanel />
-      <PanelLargeButton
-        title={t("startPanel.theme")}
-        icon={<ColorCard theme="outline" size="18" fill="var(--icon-color)" />}
-        onClick={() =>
-          toggleThemeSection(
-            THEME_PANEL_SECTION_KEY,
-            t("startPanel.themePanelTitle"),
-          )
-        }
-      />
-      <PanelSplitLine />
       <PanelLargeButton
         title={t("startPanel.newCanvas")}
         icon={<Add theme="outline" size="18" fill="var(--icon-color)" />}

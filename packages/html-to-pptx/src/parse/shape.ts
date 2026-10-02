@@ -7,6 +7,7 @@ import {
   isIdentityLinear,
   boxRelativeTo,
   findClipPathHost,
+  findRoundedImageHost,
   imageDrawInClipHost,
   isHTMLElement,
 } from "../lib/dom";
@@ -197,8 +198,25 @@ export function parseShapeAndBorders(
 
   // pptxgen has no CSS gradient fill — bake linear-gradient to a PNG so title
   // washes (opaque → transparent) survive export.
+  // Skip when background is clipped to glyphs (gradient text), or we'd export
+  // a filled rectangle instead of editable text.
   let gradientImage: ImageNode | null = null;
-  if (hasBgImage && isCssLinearGradient(bgImage) && box.w >= 1 && box.h >= 1) {
+  const bgClip = [
+    styles.backgroundClip || "",
+    typeof styles.getPropertyValue === "function"
+      ? styles.getPropertyValue("-webkit-background-clip")
+      : "",
+  ]
+    .join(" ")
+    .toLowerCase();
+  const isTextGradient = bgClip.includes("text");
+  if (
+    hasBgImage &&
+    !isTextGradient &&
+    isCssLinearGradient(bgImage) &&
+    box.w >= 1 &&
+    box.h >= 1
+  ) {
     const dataUrl = rasterizeLinearGradientBackground(bgImage, box.w, box.h, {
       doc: el.ownerDocument,
       borderRadius: styles.borderRadius,
@@ -419,6 +437,31 @@ export function parseImage(
       sizing: "stretch",
       clipPolygon: clip.polygon,
       clipDraw: imageDrawInClipHost(img, clip.host),
+      clipHostPx: { w: Math.max(1, hostW), h: Math.max(1, hostH) },
+    };
+  }
+
+  const rounded =
+    slideRoot && isHTMLElement(el)
+      ? findRoundedImageHost(el as HTMLElement, slideRoot)
+      : null;
+  if (rounded) {
+    const hostBox = boxRelativeTo(rounded.host, slideRoot!);
+    const hostW = rounded.host.offsetWidth || hostBox.w;
+    const hostH = rounded.host.offsetHeight || hostBox.h;
+    return {
+      kind: "image",
+      x: pxToInch(hostBox.x),
+      y: pxToInch(hostBox.y),
+      w: pxToInch(hostBox.w),
+      h: pxToInch(hostBox.h),
+      z,
+      src: snap.src,
+      sizing,
+      intrinsicSize,
+      objectPosition: parseObjectPosition(styles.objectPosition || "50% 50%"),
+      roundClipCss: rounded.radiusCss,
+      clipDraw: imageDrawInClipHost(img, rounded.host),
       clipHostPx: { w: Math.max(1, hostW), h: Math.max(1, hostH) },
     };
   }

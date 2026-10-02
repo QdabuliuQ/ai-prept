@@ -30,7 +30,7 @@ import { toast } from "sonner";
 import styles from "./index.module.less";
 
 const LIGHT_MENU_KEYS = new Set(["start", "edit", "toggle", "play"]);
-const PPTX_TOAST_ID = "html-to-pptx-export-progress";
+const EXPORT_TOAST_ID = "editor-export-progress";
 
 export const Header: FC = () => {
   const { t } = useTranslation();
@@ -83,7 +83,6 @@ export const Header: FC = () => {
   const getPages = usePPTStore((state) => state.getPages);
   const remixBusy = useGalleryRemixStore((state) => state.busy);
   const inputRef = useRef<HTMLInputElement>(null);
-  const [isEdit, setIsEdit] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [imageLoading, setImageLoading] = useState(false);
   const [pptxLoading, setPptxLoading] = useState(false);
@@ -104,11 +103,16 @@ export const Header: FC = () => {
       const pages = getPages().filter((page) => page.visible !== false);
 
       if (pages.length === 0) {
-        console.warn("没有可导出的页面");
+        toast.warning(t("header.noExportPages"));
         return;
       }
 
       const currentName = getName();
+      const total = pages.length;
+      toast.loading(t("header.exportPdfProgress", { current: 0, total }), {
+        id: EXPORT_TOAST_ID,
+        duration: Infinity,
+      });
 
       // 创建PDF实例 (横向，16:9)
       const pdf = new jsPDF({
@@ -124,6 +128,10 @@ export const Header: FC = () => {
       // 遍历每个页面，使用exportPageAsImage导出图片并添加到PDF
       for (let i = 0; i < pages.length; i++) {
         const page = pages[i];
+        toast.loading(
+          t("header.exportPdfProgress", { current: i + 1, total }),
+          { id: EXPORT_TOAST_ID, duration: Infinity },
+        );
 
         // 使用exportPageAsImage导出页面为图片
         const imgData = await exportPageAsImage(page.id);
@@ -191,8 +199,11 @@ export const Header: FC = () => {
 
       // 保存PDF
       pdf.save(`${currentName || t("header.untitled")}.pdf`);
+      toast.success(t("header.exportPdfSuccess"), { id: EXPORT_TOAST_ID });
     } catch (error) {
       console.error("导出PDF失败:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      toast.error(msg || t("header.exportPdfFailed"), { id: EXPORT_TOAST_ID });
     } finally {
       setTimeout(() => {
         setPdfLoading(false);
@@ -212,6 +223,15 @@ export const Header: FC = () => {
         return;
       }
 
+      toast.loading(
+        t("header.domToPptxExportProgress", {
+          current: 0,
+          total: pages.length,
+          percent: 0,
+        }),
+        { id: EXPORT_TOAST_ID, duration: Infinity },
+      );
+
       let downloadHtmlToPptx: typeof import("@/services/exportHtmlToPptx").downloadHtmlToPptx;
       try {
         ({ downloadHtmlToPptx } = await import("@/services/exportHtmlToPptx"));
@@ -226,13 +246,13 @@ export const Header: FC = () => {
         onProgress: ({ current, total }) => {
           const percent =
             total > 0 ? Math.min(100, Math.round((current / total) * 100)) : 0;
-          toast.loading(t("header.domToPptxExportProgress", { percent }), {
-            id: PPTX_TOAST_ID,
-          });
+          toast.loading(
+            t("header.domToPptxExportProgress", { current, total, percent }),
+            { id: EXPORT_TOAST_ID, duration: Infinity },
+          );
         },
       });
-      toast.dismiss(PPTX_TOAST_ID);
-      toast.success(t("header.domToPptxSuccess"));
+      toast.success(t("header.domToPptxSuccess"), { id: EXPORT_TOAST_ID });
       if (result.skippedLegacyCount > 0) {
         toast.message(
           t("header.domToPptxSkippedLegacy", {
@@ -241,7 +261,6 @@ export const Header: FC = () => {
         );
       }
     } catch (error) {
-      toast.dismiss(PPTX_TOAST_ID);
       console.error("PPTX 导出失败:", error);
       const msg = error instanceof Error ? error.message : String(error);
       const isChunk =
@@ -252,9 +271,9 @@ export const Header: FC = () => {
         isChunk
           ? "导出模块加载失败（开发态分包未就绪）。请硬刷新页面后重试。"
           : msg || t("header.domToPptxFailed"),
+        { id: EXPORT_TOAST_ID },
       );
     } finally {
-      toast.dismiss(PPTX_TOAST_ID);
       setTimeout(() => {
         setPptxLoading(false);
       }, 200);
@@ -270,15 +289,26 @@ export const Header: FC = () => {
       const pages = getPages().filter((page) => page.visible !== false);
 
       if (pages.length === 0) {
-        console.warn("没有可导出的页面");
+        toast.warning(t("header.noExportPages"));
         return;
       }
+
+      const total = pages.length;
+      toast.loading(t("header.exportImageProgress", { current: 0, total }), {
+        id: EXPORT_TOAST_ID,
+        duration: Infinity,
+      });
 
       const SPACER_HEIGHT = 50; // 黑色间隔的高度
 
       // 导出所有页面的图片
       const imageDataUrls: string[] = [];
-      for (const page of pages) {
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        toast.loading(
+          t("header.exportImageProgress", { current: i + 1, total }),
+          { id: EXPORT_TOAST_ID, duration: Infinity },
+        );
         const dataUrl = await exportPageAsImage(page.id);
         if (dataUrl) {
           imageDataUrls.push(dataUrl);
@@ -288,7 +318,7 @@ export const Header: FC = () => {
       }
 
       if (imageDataUrls.length === 0) {
-        console.warn("没有成功导出的页面");
+        toast.error(t("header.exportImageFailed"), { id: EXPORT_TOAST_ID });
         return;
       }
 
@@ -348,8 +378,13 @@ export const Header: FC = () => {
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
+      toast.success(t("header.exportImageSuccess"), { id: EXPORT_TOAST_ID });
     } catch (error) {
       console.error("导出长图失败:", error);
+      const msg = error instanceof Error ? error.message : String(error);
+      toast.error(msg || t("header.exportImageFailed"), {
+        id: EXPORT_TOAST_ID,
+      });
     } finally {
       setTimeout(() => {
         setImageLoading(false);
@@ -406,41 +441,15 @@ export const Header: FC = () => {
           <TooltipContent side="bottom">{t("header.home")}</TooltipContent>
         </Tooltip>
         <div className={styles.titleWrap}>
-          <span
-            className={`${styles.titleText} cursor-text transition-opacity duration-200 ease-in-out block w-full truncate ${
-              !isEdit
-                ? "opacity-100 relative pointer-events-auto"
-                : "opacity-0 absolute inset-y-0 left-0 pointer-events-none"
-            }`}
-            title={name || t("header.untitled")}
-            onClick={() => {
-              setIsEdit(true);
-              requestAnimationFrame(() => {
-                inputRef.current?.focus();
-              });
-            }}
-          >
-            {name || t("header.untitled")}
-          </span>
           <input
             ref={inputRef}
             type="text"
             className={styles.input}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onBlur={() => {
-              setIsEdit(false);
-            }}
             maxLength={50}
             aria-label={t("header.untitled")}
-            style={{
-              opacity: isEdit ? 1 : 0,
-              position: !isEdit ? "absolute" : "relative",
-              inset: !isEdit ? "0" : undefined,
-              width: !isEdit ? "100%" : undefined,
-              pointerEvents: !isEdit ? "none" : "auto",
-              transition: "opacity 0.2s ease-in-out",
-            }}
+            placeholder={t("header.untitled")}
           />
         </div>
       </div>

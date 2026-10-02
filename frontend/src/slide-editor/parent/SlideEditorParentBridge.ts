@@ -27,6 +27,17 @@ export type SelectedElementInfo = {
   isTextElement?: boolean;
   textContent?: string;
   computedStyles?: Record<string, string>;
+  isImageElement?: boolean;
+  intrinsicWidth?: number;
+  intrinsicHeight?: number;
+  intrinsicAspectRatio?: number;
+  /** Template slot id, if present on the node */
+  dataSlot?: string;
+  dataSlotType?: string;
+  dataSlotRole?: string;
+  dataElement?: string;
+  /** Local image path e.g. ../images/cover-asset-1.png */
+  imageSrc?: string;
 };
 
 export type ElementTransformBox = {

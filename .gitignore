@@ -8,6 +8,8 @@ frontend/dist/
 # Template / job output
 agent-output/
 .agent-output/
+# Homepage remix temporary packs (workspace/<id>/)
+workspace/
 # PPT Master intermediate PPTX (auto-created; not for manual drop-in)
 drafts/
 

@@ -24,9 +24,9 @@ const ThemeSwitcher = () => {
           size="sm"
           aria-label={label}
           onClick={handleToggle}
-          className="h-[30px] w-[30px] px-0 text-[var(--text-secondary)] hover:bg-[var(--hover-bg)] hover:text-[var(--primary-color)]"
+          className="px-2.5"
         >
-          {isDark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          {isDark ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
         </Button>
       </TooltipTrigger>
       <TooltipContent side="bottom">{label}</TooltipContent>

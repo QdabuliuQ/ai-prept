@@ -18,6 +18,7 @@ SYSTEM_PLAN = """你是演示文稿策划师，为 PPT Master Quick Generate 规
   sketch-notes | ink-notes | chalkboard | ink-wash | pixel-art |
   gallery-white | midnight-luxe | nordic-calm | kinetic-poster | dossier-archive
 - palette 由模型为本册原创，须符合所选风格的用色纪律（明暗、强调色稀密度、是否近单色等）；禁止套用固定色板；禁止在非 tech 风格里沿用深蓝底+青紫霓虹
+- **色温纪律**：除非风格卡明确要求纸感 / 牛皮 / 奶油 / 米白 / warm paper field，禁止把 bg 做成默认米色暖奶油（如 #F4F1EA / #FAF7F2 / #F5F0E8 / oatmeal）；浅色场优先冷白、冷灰、近纯白或带明确色相的浅底；亦可做深色哑光或高饱和色块底
 - template_id 与 label_zh 必须是**10–15 个汉字**的详细中文名（可含少量字母数字/间隔符），用作落地目录名与展示名
   · **命名 = 本册内容主题**（产品/活动/受众/议题），取自用户需求文案；**不是** visual_style 的中文译名或风格卡隐喻
   · visual_style 只规定「页面长什么样」（构图/装饰/字体性格）；同一风格可服务完全不同的主题
@@ -110,7 +111,7 @@ SYSTEM_SVG = """你是 PPT Master 规范 SVG 作者。只输出完整 SVG XML（
 12. **满版装饰必须是根级 shape**（rect/circle/line/polygon/path），各自带 id + data-pptx-role="decoration"。禁止把它们包进带 data-pptx-bounds 的根级 <g> 去盖住文字模块
 13. 禁止对零高度/零宽度的 <line> 使用 url(#…) 渐变描边；改用细 <rect> + fill="url(#…)"
 14. 超大数字字号必须落在 viewBox 内（估算墨迹不超出 0..1280 × 0..720）
-15. 使用本册规划中的原创 palette；不要换成暗色科技默认霓虹配方
+15. 使用本册规划中的原创 palette；不要换成暗色科技默认霓虹配方，也不要无依据地退回米色暖奶油纸底
 16. **图文分工**：生图=主视觉/插图/背景图（题材按 image_hint，照片或插画均可）；SVG=结构+局部装饰（色条/胶带/标签/撕边/错位字）。禁止用大量 <circle> 铺半调/纹理；每页装饰 circle 建议 <40
 17. **配图（若本页提供了已准备文件）**：仅允许本地
    `<image id="hero-img" href="../images/<给定文件名>" x="…" y="…" width="…" height="…" preserveAspectRatio="xMidYMid slice" data-pptx-role="decoration" data-slot="hero-image" data-slot-type="image" data-slot-role="hero-image"/>`
@@ -231,6 +232,7 @@ def user_plan(
 规划严格 {page_count} 页，不得增删。
 visual_style 字段必须写死为：{style}
 为本册原创一套 palette（符合风格用色纪律即可，不要套用任何固定 HEX 配方）；若用户需求文案里误写了其它风格词，以本任务指定的 {style} 为准。
+除非本风格明确要求纸感/牛皮/奶油场，bg 不要默认米色暖奶油；浅色优先冷白/冷灰/近纯白。
 创意方向提示：{creative_seed or "自行提出一个符合该风格的视觉母题"}
 {f"上一版需要修正的问题：{critique}" if critique else ""}
 {image_line}
@@ -437,6 +439,16 @@ def user_svg_fusion_followup(*, fusion_critique: str) -> str:
         "上一稿存在配图/兼容性问题，必须修正后重新输出完整 SVG XML。\n\n"
         f"{fusion_critique.strip()}\n\n"
         "只输出修复后的完整 SVG，不要解释。"
+    )
+
+
+def user_svg_empty_retry(*, reason: str) -> str:
+    """Follow-up when the model returned empty / non-SVG / ill-formed XML."""
+    detail = (reason or "empty or invalid").strip()
+    return (
+        f"上一次输出不是完整可解析的 SVG（{detail}）。\n"
+        "请只输出完整 XML SVG 文档：必须包含根元素 <svg …>…</svg>，"
+        "以 <?xml 或 <svg 开头，以 </svg> 结束；不要 markdown 围栏，不要解释，不要只输出 XML 声明。"
     )
 
 

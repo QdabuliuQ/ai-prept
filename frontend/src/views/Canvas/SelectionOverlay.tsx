@@ -60,7 +60,7 @@ type DragState = {
 const MIN_SIZE = 8;
 /** All resize handles (corners + edges) — circular */
 const HANDLE_SIZE = 10;
-const ROTATE_HANDLE = 14;
+const ROTATE_HANDLE = 16;
 /** Gap between rotate knob and selection box edge */
 const ROTATE_STEM = 16;
 /** Top-left move grip — only way to drag-move */
@@ -546,13 +546,25 @@ export const SelectionOverlay: FC<SelectionOverlayProps> = ({
             </svg>
           </button>
 
-          {/* Rotate — offset above box, connected by a stem */}
+          {/* Rotate stem — behind top-edge resize handle (z below handles) */}
           <div
-            className="absolute left-1/2 -translate-x-1/2 pointer-events-auto z-[3]"
+            className="absolute left-1/2 -translate-x-1/2 w-px pointer-events-none z-[1] bg-[var(--primary-color,#f25f00)]"
+            style={{
+              top: -ROTATE_STEM,
+              height: ROTATE_STEM,
+            }}
+            aria-hidden
+          />
+
+          {/* Rotate knob */}
+          <button
+            type="button"
+            title="旋转"
+            className="absolute left-1/2 -translate-x-1/2 pointer-events-auto z-[3] flex items-center justify-center rounded-full border-0 bg-[var(--primary-color,#f25f00)] shadow-sm cursor-grab active:cursor-grabbing box-border p-0"
             style={{
               top: -(ROTATE_HANDLE + ROTATE_STEM),
               width: ROTATE_HANDLE,
-              height: ROTATE_HANDLE + ROTATE_STEM,
+              height: ROTATE_HANDLE,
             }}
             onPointerDown={(e) => {
               e.stopPropagation();
@@ -562,16 +574,21 @@ export const SelectionOverlay: FC<SelectionOverlayProps> = ({
               });
             }}
           >
-            <div
-              className="absolute left-1/2 -translate-x-1/2 w-px bg-[var(--primary-color,#f25f00)]"
-              style={{ top: ROTATE_HANDLE, height: ROTATE_STEM }}
-            />
-            <div
-              className="rounded-full border-2 border-[var(--primary-color,#f25f00)] bg-white cursor-grab box-border"
-              title="旋转"
-              style={{ width: ROTATE_HANDLE, height: ROTATE_HANDLE }}
-            />
-          </div>
+            <svg
+              width="10"
+              height="10"
+              viewBox="0 0 16 16"
+              aria-hidden
+              fill="none"
+              stroke="white"
+              strokeWidth="1.75"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M13.2 6.2A5.2 5.2 0 1 0 12.4 11" />
+              <path d="M13.2 2.8v3.4h-3.4" />
+            </svg>
+          </button>
 
           {edgeHandles.map((h) => (
             <div

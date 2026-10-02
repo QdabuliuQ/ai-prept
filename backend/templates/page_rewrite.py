@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from config import is_mock, llm_config, load_env
 from llm import chat_text, make_client_pool
+from templates.normalize import wrap_bare_text_runs
 from templates.sanitize import sanitize_export_css
 from usage import track_usage, use_usage
 
@@ -41,6 +42,7 @@ SYSTEM_PAGE_REWRITE = """你是 WebPPT HTML 幻灯片作者。只输出完整 HT
 5. 禁止 <script>、外链 CSS、foreignObject、iframe
 6. 可用绝对定位 div + 少量 SVG 装饰；按「用户问题」修正文案与版式，可调整构图，但保持同一主题气质
 7. 输出必须是可独立打开的完整 HTML（html/head/body）
+8. 可见文案必须包在元素里：优先兄弟 `<span data-element="text">…</span>`；禁止在含有子元素的容器里再挂裸文本（例如 `<div>前缀<span>强调</span></div>` 必须写成两个 span）
 """
 
 
@@ -223,7 +225,10 @@ def build_user_prompt(
     images: list[str],
     slot_texts: list[dict[str, str]],
     visual_spec_excerpt: str,
+    target_element: dict[str, Any] | None = None,
 ) -> str:
+    from templates.element_target import format_target_for_prompt
+
     img_line = (
         "允许的图片文件（必须原样使用 ../images/<name>）：\n"
         + "\n".join(f"- {n}" for n in images)
@@ -232,6 +237,8 @@ def build_user_prompt(
     )
     slots_json = json.dumps(slot_texts, ensure_ascii=False, indent=2)
     sib = "\n".join(f"- {s}" for s in siblings) or "（无）"
+    target_block = format_target_for_prompt(target_element)
+    target_section = f"\n{target_block}\n" if target_block else ""
     return f"""## 模板
 id/label: {label}
 visual_style: {visual_style or "（未知）"}
@@ -239,7 +246,7 @@ visual_style: {visual_style or "（未知）"}
 
 ## 用户问题（必须解决）
 {issue.strip()}
-
+{target_section}
 ## 邻页标题（节奏参考）
 {sib}
 
@@ -263,6 +270,7 @@ visual_style: {visual_style or "（未知）"}
 
 ## 任务
 输出修正后的完整 HTML。解决用户问题；可调整版式与装饰；保留 theme 气质与允许的本地图片。
+若提供了「选中元素」，优先只改该元素及其必要周边，避免无关整页重排。
 """
 
 
@@ -273,6 +281,7 @@ def run_page_rewrite(
     page_index: int | None = None,
     issue: str,
     mock: bool | None = None,
+    target_element: dict[str, Any] | None = None,
     log: LogFn | None = None,
 ) -> dict[str, Any]:
     load_env()
@@ -342,6 +351,7 @@ def run_page_rewrite(
                 images=images,
                 slot_texts=slot_texts,
                 visual_spec_excerpt=visual_spec,
+                target_element=target_element,
             )
             with use_usage(usage):
                 raw = chat_text(
@@ -358,17 +368,17 @@ def run_page_rewrite(
         rewritten = san.text
         if san.fixes:
             _log(log, f"[rewrite-page] sanitize: {'；'.join(san.fixes[:4])}")
+        wrapped = wrap_bare_text_runs(rewritten)
+        rewritten = wrapped.html
+        if wrapped.bare_text_fixes:
+            _log(
+                log,
+                f"[rewrite-page] wrap bare text×{wrapped.bare_text_fixes}",
+            )
         validate_rewritten_html(rewritten, allowed_images=images)
 
-        # Backup then write
-        bak_dir = package_dir / "slides" / "_rewrites"
-        bak_dir.mkdir(parents=True, exist_ok=True)
-        stem = Path(rel).stem
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        bak_path = bak_dir / f"{stem}.{ts}.html"
-        bak_path.write_text(original, encoding="utf-8")
         slide_path.write_text(rewritten.rstrip() + "\n", encoding="utf-8")
-        _log(log, f"[rewrite-page] wrote {rel} (backup {bak_path.name})")
+        _log(log, f"[rewrite-page] wrote {rel}")
 
         # Update template.json
         title_hint = extract_title_hint(rewritten) or extract_title_hint(original)
@@ -382,7 +392,6 @@ def run_page_rewrite(
             "file": rel,
             "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "issue": issue[:500],
-            "backup": str(bak_path.relative_to(package_dir)),
         }
         meta["usage"] = usage.to_dict()
         (package_dir / "template.json").write_text(
@@ -394,7 +403,6 @@ def run_page_rewrite(
         "ok": True,
         "template_id": str(meta.get("public_id") or meta.get("template_id") or package_dir.name),
         "file": rel,
-        "backup": str(bak_path.relative_to(package_dir)),
         "title": title_hint,
         "usage": usage.to_dict() if not use_mock else None,
     }

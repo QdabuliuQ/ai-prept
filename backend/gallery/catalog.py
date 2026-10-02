@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 SAFE_TEMPLATE_DIR = re.compile(r"^[A-Za-z0-9._\u4e00-\u9fff-]+$")
-RESERVED_OUTPUT_DIRS = {"admin-jobs", "packs", "templates"}
+# 与 admin.fsutil.RESERVED_OUTPUT_DIRS 对齐（含 sessions 临时包）
+RESERVED_OUTPUT_DIRS = {"admin-jobs", "packs", "templates", "sessions"}
 
 
 def repo_root() -> Path:

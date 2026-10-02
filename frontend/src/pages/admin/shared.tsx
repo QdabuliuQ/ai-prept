@@ -106,11 +106,42 @@ export function isActiveJob(status: string) {
 export function needsBrowserHtmlConvert(job: {
   status?: string;
   needsBrowserConvert?: boolean;
+  pendingConvertIds?: string[];
+  convertTemplateId?: string;
+  templateId?: string;
+  templateIds?: string[];
 }): boolean {
-  return (
-    job.status === "awaiting_html" ||
-    (Boolean(job.needsBrowserConvert) && job.status !== "succeeded")
-  );
+  if (
+    job.status !== "awaiting_html" &&
+    !job.needsBrowserConvert
+  ) {
+    return false;
+  }
+  return pendingConvertTemplateIds(job).length > 0;
+}
+
+/** Template ids waiting for browser PPTX→HTML (supports multi-pack jobs). */
+export function pendingConvertTemplateIds(job: {
+  pendingConvertIds?: string[];
+  convertTemplateId?: string;
+  templateId?: string;
+  templateIds?: string[];
+  needsBrowserConvert?: boolean;
+  status?: string;
+}): string[] {
+  const fromList = (job.pendingConvertIds || [])
+    .map((x) => String(x || "").trim())
+    .filter(Boolean);
+  if (fromList.length > 0) return [...new Set(fromList)];
+  // Only fall back when convert is explicitly requested — never for ordinary running jobs.
+  if (!job.needsBrowserConvert && job.status !== "awaiting_html") {
+    return [];
+  }
+  const single =
+    String(job.convertTemplateId || "").trim() ||
+    String(job.templateId || "").trim() ||
+    String(job.templateIds?.[0] || "").trim();
+  return single ? [single] : [];
 }
 
 export function AdminSlideFrame({

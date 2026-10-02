@@ -17,6 +17,7 @@ import { normalizeColor, normalizeTextAlign } from "./utils/css";
 import {
 	isSlideShellElement,
 	getUnrotatedViewportBox,
+	prepareElementForEditorTransform,
 	releaseAncestorOverflow,
 	releaseAllTextSlotOverflow,
 } from "./utils/transform";
@@ -41,6 +42,36 @@ interface ElementInfo {
 	rotation?: number
 	isTextElement?: boolean
 	textContent?: string
+	dataSlot?: string
+	dataSlotType?: string
+	dataSlotRole?: string
+	dataElement?: string
+	imageSrc?: string
+}
+
+function readElementMeta(element: EditableElement): {
+	dataSlot?: string
+	dataSlotType?: string
+	dataSlotRole?: string
+	dataElement?: string
+	imageSrc?: string
+} {
+	const attr = (name: string) => {
+		const v = element.getAttribute(name)?.trim()
+		return v || undefined
+	}
+	let imageSrc = attr("src")
+	if (!imageSrc) {
+		const img = element.querySelector?.("img")
+		imageSrc = img?.getAttribute("src")?.trim() || undefined
+	}
+	return {
+		dataSlot: attr("data-slot"),
+		dataSlotType: attr("data-slot-type"),
+		dataSlotRole: attr("data-slot-role"),
+		dataElement: attr("data-element"),
+		imageSrc,
+	}
 }
 
 export class ElementSelector {
@@ -116,6 +147,7 @@ export class ElementSelector {
 				editorId,
 				tagName: element.tagName.toLowerCase(),
 				...imageMetadata,
+				...readElementMeta(element),
 				computedStyles: styles,
 				rect,
 				rotation,
@@ -200,13 +232,10 @@ export class ElementSelector {
 
 	private canFormatElement(element: HTMLElement): boolean {
 		if (this.isTextElement(element)) return true
-		const slotType = (element.getAttribute("data-slot-type") || "").toLowerCase()
 		const dataElement = (
 			element.getAttribute("data-element") || ""
 		).toLowerCase()
 		if (
-			slotType === "image" ||
-			slotType === "chart" ||
 			dataElement === "image" ||
 			dataElement === "shape" ||
 			dataElement === "chart"
@@ -701,16 +730,42 @@ export class ElementSelector {
 
 	private isTransparentColor(color: string): boolean {
 		const c = (color || "").trim().toLowerCase()
-		if (!c || c === "transparent") return true
-		const rgba = c.match(
-			/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$/,
-		)
-		if (rgba && rgba[4] != null) {
-			const a = rgba[4].endsWith("%")
-				? parseFloat(rgba[4]) / 100
-				: parseFloat(rgba[4])
-			if (!Number.isNaN(a) && a <= 0.01) return true
+		if (!c || c === "transparent" || c === "none") return true
+
+		const parseAlpha = (raw: string | undefined): number | null => {
+			if (raw == null || raw === "") return null
+			const a = raw.endsWith("%")
+				? parseFloat(raw) / 100
+				: parseFloat(raw)
+			return Number.isNaN(a) ? null : a
 		}
+
+		// Legacy: rgba(0, 0, 0, 0) / rgb(0, 0, 0, 0)
+		const legacy = c.match(
+			/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+%?))?\s*\)$/,
+		)
+		if (legacy) {
+			const a = parseAlpha(legacy[4])
+			// Missing alpha ⇒ opaque; alpha ≈ 0 ⇒ transparent
+			return a != null && a <= 0.01
+		}
+
+		// CSS Color 4: rgb(0 0 0 / 0) / rgba(0 0 0 / 0%)
+		const modern = c.match(
+			/^rgba?\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)(?:\s*\/\s*([\d.]+%?))?\s*\)$/,
+		)
+		if (modern) {
+			const a = parseAlpha(modern[4])
+			return a != null && a <= 0.01
+		}
+
+		// color(srgb … / a), lab(… / a), oklab(… / a), etc.
+		const slashAlpha = c.match(/\/\s*([\d.]+%?)\s*\)\s*$/)
+		if (slashAlpha) {
+			const a = parseAlpha(slashAlpha[1])
+			return a != null && a <= 0.01
+		}
+
 		return false
 	}
 
@@ -745,8 +800,36 @@ export class ElementSelector {
 		return false
 	}
 
+	private isInvisibleBoxShadow(shadow: string): boolean {
+		const s = (shadow || "").trim().toLowerCase()
+		if (!s || s === "none") return true
+		// e.g. "rgba(0, 0, 0, 0) 0px 0px 0px 0px"
+		const layers = s.split(/,(?![^(]*\))/)
+		return layers.every((layer) => {
+			const t = layer.trim()
+			if (!t || t === "none" || t.includes("transparent")) return true
+
+			const alphaMatch = t.match(
+				/rgba?\(\s*[\d.]+\s*[,/\s]+[\d.]+\s*[,/\s]+[\d.]+(?:\s*[,/]\s*([\d.]+%?))?\s*\)/,
+			)
+			if (alphaMatch && alphaMatch[1] != null) {
+				const a = alphaMatch[1].endsWith("%")
+					? parseFloat(alphaMatch[1]) / 100
+					: parseFloat(alphaMatch[1])
+				if (!Number.isNaN(a) && a <= 0.01) return true
+			}
+
+			const nums = (t.match(/-?[\d.]+px/g) || []).map((n) =>
+				Math.abs(parseFloat(n)),
+			)
+			return nums.length > 0 && nums.every((n) => n <= 0.01)
+		})
+	}
+
 	/**
-	 * Non-text visual chrome: fill, stroke, shadow, filter, etc.
+	 * Real painted chrome only (fill / stroke / shadow / media).
+	 * Do NOT treat filter / outline / backdrop alone — layout wrappers
+	 * often trip those and become falsely selectable.
 	 */
 	private hasDecorativeStyles(element: EditableElement): boolean {
 		if (element instanceof SVGSVGElement) return true
@@ -754,30 +837,25 @@ export class ElementSelector {
 
 		const cs = window.getComputedStyle(element)
 
-		if (cs.backgroundImage && cs.backgroundImage !== "none") return true
 		if (!this.isTransparentColor(cs.backgroundColor)) return true
-		if (this.hasVisibleBorder(cs)) return true
-		if (cs.boxShadow && cs.boxShadow !== "none") return true
-		if (cs.filter && cs.filter !== "none") return true
-		if (
-			cs.outlineStyle &&
-			cs.outlineStyle !== "none" &&
-			parseFloat(cs.outlineWidth || "0") > 0
-		) {
-			return true
+
+		const bgImage = (cs.backgroundImage || "").trim()
+		if (bgImage && bgImage !== "none") {
+			const layers = bgImage.split(/,(?![^(]*\))/)
+			if (layers.some((l) => l.trim() !== "none")) return true
 		}
-		const backdrop =
-			(cs as CSSStyleDeclaration & { backdropFilter?: string }).backdropFilter ||
-			(cs as CSSStyleDeclaration & { webkitBackdropFilter?: string })
-				.webkitBackdropFilter
-		if (backdrop && backdrop !== "none") return true
+
+		if (this.hasVisibleBorder(cs)) return true
+		if (!this.isInvisibleBoxShadow(cs.boxShadow || "")) return true
 
 		return false
 	}
 
 	/**
 	 * Selectable if: text, image/media, chart block, or decorative surface.
-	 * Plain layout wrappers (flex/grid with no chrome) are skipped.
+	 * Layout `div` wrappers (flex/absolute shells) are never targets —
+	 * pick the inner text leaf or a really painted shape instead.
+	 * Do not use data-slot-type for selection.
 	 */
 	private isSelectableContent(element: EditableElement): boolean {
 		if (isInjectedElement(element)) return false
@@ -785,8 +863,67 @@ export class ElementSelector {
 		if (this.isTextElement(element)) return true
 		if (this.isImageElement(element)) return true
 		if (this.isChartContainer(element)) return true
+
+		if (element instanceof HTMLElement) {
+			const tag = element.tagName.toLowerCase()
+			const dataElement = (
+				element.getAttribute("data-element") || ""
+			).toLowerCase()
+			// Bare layout div with no role: only if it actually paints pixels
+			if (tag === "div" && !dataElement) {
+				return this.hasDecorativeStyles(element)
+			}
+		}
+
 		if (this.hasDecorativeStyles(element)) return true
 		return false
+	}
+
+	/**
+	 * Text node (or Element) under viewport coordinates.
+	 * Prefer caretRangeFromPoint / caretPositionFromPoint; fall back to null.
+	 */
+	private nodeFromPoint(clientX: number, clientY: number): Node | null {
+		const doc = document as Document & {
+			caretRangeFromPoint?: (x: number, y: number) => Range | null
+			caretPositionFromPoint?: (
+				x: number,
+				y: number,
+			) => { offsetNode: Node; offset: number } | null
+		}
+		if (typeof doc.caretRangeFromPoint === "function") {
+			try {
+				const range = doc.caretRangeFromPoint(clientX, clientY)
+				return range?.startContainer ?? null
+			} catch {
+				/* ignore */
+			}
+		}
+		if (typeof doc.caretPositionFromPoint === "function") {
+			try {
+				const pos = doc.caretPositionFromPoint(clientX, clientY)
+				return pos?.offsetNode ?? null
+			} catch {
+				/* ignore */
+			}
+		}
+		return null
+	}
+
+	/**
+	 * Map pointer to editable host. When the caret hits a Text node
+	 * (bare text beside spans), start from that text's parent element.
+	 */
+	private resolveHostFromPointer(e: MouseEvent): EditableElement | null {
+		const hit = this.nodeFromPoint(e.clientX, e.clientY)
+		if (hit && hit.nodeType === Node.TEXT_NODE) {
+			const parent = hit.parentElement
+			if (parent) {
+				const fromText = resolveEditableHost(parent)
+				if (fromText) return fromText
+			}
+		}
+		return resolveEditableHost(e.target)
 	}
 
 	/**
@@ -815,24 +952,22 @@ export class ElementSelector {
 	}
 
 	/**
-	 * Text leaf or text slot/container.
-	 * e.g. `<span>text</span>`, `<div>plain</div>`,
-	 * `<div data-slot-type="text"><span>…</span></div>`,
-	 * `<div class="title"><span>标题</span></div>` (phrasing-only kids).
+	 * Text leaf or explicit text role (`data-element="text"`).
+	 * Prefer real text tags (span/p/h1/…) and leaf divs with only text/br.
+	 * A `div` that merely wraps phrasing kids (e.g. `<div><span>…</span></div>`)
+	 * is a layout shell — not a target; pick the inner span instead.
+	 * Selection does not consult data-slot-type.
 	 */
 	private isTextElement(element: EditableElement): boolean {
 		if (!(element instanceof HTMLElement)) return false
 
 		const tagName = element.tagName.toLowerCase()
-		const slotType = (element.getAttribute("data-slot-type") || "").toLowerCase()
 		const dataElement = (
 			element.getAttribute("data-element") || ""
 		).toLowerCase()
 
 		// Non-text roles
 		if (
-			slotType === "image" ||
-			slotType === "chart" ||
 			dataElement === "image" ||
 			dataElement === "shape" ||
 			dataElement === "chart"
@@ -842,8 +977,8 @@ export class ElementSelector {
 
 		const hasText = (element.textContent?.trim() || "").length > 0
 
-		// Explicit text slots / roles — allow nested phrasing markup
-		if (slotType === "text" || dataElement === "text") {
+		// Explicit text role — allow nested phrasing markup
+		if (dataElement === "text") {
 			return hasText
 		}
 
@@ -884,38 +1019,45 @@ export class ElementSelector {
 			"button",
 			"blockquote",
 			"pre",
+			// leaf text boxes only (no element children except br)
+			"div",
 		])
 
-		const allowTag = textTags.has(tagName) || tagName === "div"
-		if (!allowTag) return false
+		if (!textTags.has(tagName)) return false
+		if (!hasText) return false
 
 		const structuralKids = Array.from(element.children).filter((c) => {
 			const t = c.tagName.toLowerCase()
 			return t !== "br" && t !== "wbr"
 		})
 
-		// Wrapper with element children
+		// Layout shell wrapping other blocks (div/svg/…) — not a text target
 		if (structuralKids.length > 0) {
 			const onlyPhrasing = structuralKids.every((c) =>
 				phrasingTags.has(c.tagName.toLowerCase()),
 			)
-			// Text block / title shell that only wraps spans/em/… (common in templates)
-			if (onlyPhrasing && hasText) return true
-
 			const hasDirectText = Array.from(element.childNodes).some(
 				(n) =>
 					n.nodeType === Node.TEXT_NODE &&
 					(n.textContent?.trim() || "").length > 0,
 			)
-			// Layout div that nests block/structure nodes is never a text leaf
-			if (tagName === "div") return false
-			// Inline text tags may mix own text + nested emphasis: <span>a<em>b</em></span>
+			// e.g. <p><span>…</span></p> or <span>a<em>b</em></span>
+			// But <div><span>…</span></div> is a shell — prefer the span.
+			// Exception: mixed bare text + span → allow selecting the div when
+			// the pointer lands on the bare text (caret / event.target = div).
+			if (onlyPhrasing) {
+				if (tagName !== "div") return true
+				return hasDirectText
+			}
+
 			if (!hasDirectText) return false
-			return textTags.has(tagName)
+			// div with mixed block kids + direct text is still a shell
+			if (tagName === "div") return false
+			return true
 		}
 
 		// True leaf: only text / br inside
-		return hasText
+		return true
 	}
 
 	/**
@@ -923,6 +1065,12 @@ export class ElementSelector {
 	 * Must stay consistent with applyElementTransform origin math.
 	 */
 	private getElementRectWithRotation(element: EditableElement) {
+		// Align layout mode with drag path before measuring — otherwise selecting
+		// an inline title then dragging promotes it to inline-block and the orange
+		// box no longer matches the glyphs (often looks shifted right).
+		if (element instanceof HTMLElement) {
+			prepareElementForEditorTransform(element)
+		}
 		const box = getUnrotatedViewportBox(element)
 		return {
 			rect: {
@@ -1056,6 +1204,7 @@ export class ElementSelector {
 				editorId,
 				tagName: element.tagName.toLowerCase(),
 				...imageMetadata,
+				...readElementMeta(element),
 				computedStyles: styles,
 				rect,
 				rotation,
@@ -1077,7 +1226,7 @@ export class ElementSelector {
 		document.addEventListener("mousemove", (e) => {
 			if (!this.enabled) return
 
-			const host = resolveEditableHost(e.target)
+			const host = this.resolveHostFromPointer(e)
 			if (!host) {
 				if (this.hoveredElement) {
 					this.hoveredElement = null
@@ -1118,7 +1267,7 @@ export class ElementSelector {
 		document.addEventListener("mouseout", (e) => {
 			if (!this.enabled) return
 
-			const host = resolveEditableHost(e.target)
+			const host = this.resolveHostFromPointer(e)
 			if (host && !this.isSelected(host)) {
 				// Clear hover effect in parent window
 				this.bridge.sendEvent("ELEMENT_HOVER_END", {})
@@ -1131,7 +1280,7 @@ export class ElementSelector {
 			(e) => {
 				if (!this.enabled) return
 
-				const host = resolveEditableHost(e.target)
+				const host = this.resolveHostFromPointer(e)
 				if (!host) return
 
 				// Check if there's a text selection - if so, don't trigger element selection

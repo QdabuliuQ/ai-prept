@@ -291,7 +291,7 @@ describe("SlideEditorParentBridge", () => {
 
   it("supports the convenience methods with the expected request and command payloads", async () => {
     const enterPromise = bridge.enterSelectionMode();
-    let [enterMessage] = iframe.contentWindow.postMessage.mock.calls[0];
+    const [enterMessage] = iframe.contentWindow.postMessage.mock.calls[0];
     dispatchMessage(
       iframe.contentWindow,
       responseMessage(enterMessage.requestId, { success: true }),
@@ -299,7 +299,7 @@ describe("SlideEditorParentBridge", () => {
     await expect(enterPromise).resolves.toEqual({ success: true });
 
     const exitPromise = bridge.exitSelectionMode();
-    let [exitMessage] = iframe.contentWindow.postMessage.mock.calls[1];
+    const [exitMessage] = iframe.contentWindow.postMessage.mock.calls[1];
     dispatchMessage(
       iframe.contentWindow,
       responseMessage(exitMessage.requestId, { success: true }),

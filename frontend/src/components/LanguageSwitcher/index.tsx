@@ -41,9 +41,9 @@ const LanguageSwitcher = () => {
           type="button"
           variant="ghost"
           size="sm"
-          className="h-[30px] gap-1 px-2 text-[12px] font-medium text-[var(--text-secondary)] hover:bg-[var(--hover-bg)] hover:text-[var(--primary-color)]"
+          className="gap-1.5"
         >
-          <Languages className="size-4" />
+          <Languages className="size-3.5" />
           {currentLabel}
         </Button>
       </DropdownMenuTrigger>

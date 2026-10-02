@@ -15,6 +15,7 @@ from admin.fsutil import (
     html_slide_count,
     jobs_dir,
     list_template_ids,
+    list_template_tree,
     read_meta,
     resolve_under,
     template_dir,
@@ -113,6 +114,11 @@ def to_summary(template_id: str, meta: dict[str, Any]) -> dict[str, Any]:
     storage = meta.get("storage") if isinstance(meta.get("storage"), dict) else {}
     render = effective_render(meta)
     review = meta.get("review") if isinstance(meta.get("review"), dict) else {}
+    source_pptx = (template_dir(template_id) / "source.pptx").is_file()
+    html_convert_needed = (
+        str(meta.get("html_convert") or "").strip().lower() == "needed"
+        or (len(slides) == 0 and source_pptx and render == "svg")
+    )
     return {
         "id": template_id,
         "templateId": template_id,
@@ -125,6 +131,7 @@ def to_summary(template_id: str, meta: dict[str, Any]) -> dict[str, Any]:
         "format": effective_format(meta),
         "render": render,
         "htmlConvertFailed": render == "svg-fallback",
+        "htmlConvertNeeded": html_convert_needed,
         "reviewNote": str(review.get("note") or "").strip() or None,
         "status": effective_status(meta),
         "storageBackend": storage.get("backend") or "local",
@@ -165,8 +172,15 @@ def list_templates(statuses: list[str] | None = None) -> list[dict[str, Any]]:
 
 def upsert_template_row(template_id: str) -> None:
     """把单个模板的当前 summary 写入 DB。"""
+    from admin.fsutil import is_session_template
+
+    # 首页 remix 临时包不进 gallery / Admin 目录
+    if is_session_template(template_id):
+        return
     meta = read_meta(template_id)
     if not meta:
+        return
+    if meta.get("ephemeral") is True:
         return
     try:
         from admin.pack import ensure_public_id
@@ -576,6 +590,7 @@ def load_editor_doc(template_id: str) -> dict[str, Any] | None:
     if not pages:
         return None
     name = (meta.get("label") or {}).get("zh_CN") or template_id
+    tree = list_template_tree(template_id) or []
     return {
         "id": template_id,
         "name": name,
@@ -585,6 +600,7 @@ def load_editor_doc(template_id: str) -> dict[str, Any] | None:
         "label": meta.get("label"),
         "description": meta.get("description"),
         "meta": meta,
+        "tree": tree,
         "pages": pages,
     }
 

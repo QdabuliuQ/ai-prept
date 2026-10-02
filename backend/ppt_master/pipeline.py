@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
-DEFAULT_SLIDE_CONCURRENCY = 6
+DEFAULT_SLIDE_CONCURRENCY = 3
 MAX_SLIDE_CONCURRENCY = 8
 
 from config import is_mock, llm_config, llm_light_config, load_env
@@ -50,7 +50,7 @@ LogFn = Callable[[str], None]
 
 
 def _resolve_slide_concurrency(requested: int | None, n_slides: int) -> int:
-    """Clamp SVG fan-out: default 6, hard cap 8 (override via AGENT_SLIDE_CONCURRENCY_MAX)."""
+    """Clamp SVG fan-out: default 3, hard cap 8 (override via AGENT_SLIDE_CONCURRENCY_MAX)."""
     try:
         env_cap = int(os.environ.get("AGENT_SLIDE_CONCURRENCY_MAX", str(MAX_SLIDE_CONCURRENCY)))
     except ValueError:
@@ -227,6 +227,75 @@ def _strip_svg(raw: str) -> str:
     if not text.lstrip().startswith("<?xml"):
         text = '<?xml version="1.0" encoding="UTF-8"?>\n' + text.lstrip()
     return text.strip() + "\n"
+
+
+# Empty LLM shells become exactly this 39-byte declaration via _strip_svg("").
+_MIN_AUTHORED_SVG_CHARS = 500
+
+
+def authored_svg_reject_reason(text: str) -> str | None:
+    """Return a short reason if SVG is not safe to write / export; else None."""
+    raw = text or ""
+    stripped = raw.strip()
+    if not stripped:
+        return "empty"
+    lower = stripped.lower()
+    if "<svg" not in lower:
+        return "missing <svg> root"
+    if "</svg>" not in lower:
+        return "missing </svg> closer"
+    # Declaration-only (or near-empty) shells after _strip_svg
+    body = stripped
+    if body.startswith("<?xml"):
+        end = body.find("?>")
+        if end >= 0:
+            body = body[end + 2 :].strip()
+    if not body or body.lower().startswith("<?xml"):
+        return "xml declaration only"
+    if len(stripped) < _MIN_AUTHORED_SVG_CHARS:
+        return f"too small ({len(stripped)} chars)"
+    if not is_well_formed_svg(stripped):
+        return "not well-formed XML"
+    return None
+
+
+def assert_authored_svg_viable(text: str, *, label: str) -> str:
+    reason = authored_svg_reject_reason(text)
+    if reason:
+        raise RuntimeError(f"SVG not viable for {label}: {reason}")
+    return text
+
+
+def collect_nonviable_svgs(svg_dir: Path) -> list[str]:
+    """List ``name: reason`` for empty / ill-formed pages under svg_output."""
+    if not svg_dir.is_dir():
+        return [f"(missing svg_output: {svg_dir})"]
+    bad: list[str] = []
+    for path in sorted(svg_dir.glob("*.svg")):
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            bad.append(f"{path.name}: read error ({exc})")
+            continue
+        reason = authored_svg_reject_reason(raw)
+        if reason:
+            bad.append(f"{path.name}: {reason}")
+    return bad
+
+
+def assert_svg_dir_viable(
+    svg_dir: Path,
+    *,
+    log: LogFn | None = None,
+    context: str = "export",
+) -> None:
+    """Hard-block empty shells — never soft-pass / svg-fallback these pages."""
+    bad = collect_nonviable_svgs(svg_dir)
+    if not bad:
+        return
+    msg = f"empty/invalid SVG blocking {context}: " + "; ".join(bad)
+    _log(log, f"[svg] {msg}")
+    raise RuntimeError(msg)
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None, log: LogFn | None = None) -> None:
@@ -473,6 +542,14 @@ def _repair_failed_svgs(
             if only_css and is_well_formed_svg(raw):
                 continue
             if any("Invalid XML" in msg or "well-formed" in msg for msg in issues):
+                # Empty shells cannot be salvaged — leave for pre-export hard fail.
+                if authored_svg_reject_reason(raw):
+                    _log(
+                        log,
+                        f"[quality] empty/invalid {file_name}; "
+                        "skip LLM repair (hard-block at export)",
+                    )
+                    continue
                 salvaged = salvage_truncated_svg(raw)
                 if salvaged and is_well_formed_svg(salvaged):
                     path.write_text(sanitize_svg_text(salvaged), encoding="utf-8")
@@ -1563,19 +1640,29 @@ def _export_pptx(
     )
 
     # Soft-pass export still requires parseable SVG; salvage truncations now.
+    unparseable: list[str] = []
     for path in sorted(svg_dir.glob("*.svg")):
         raw = path.read_text(encoding="utf-8")
-        if is_well_formed_svg(raw):
+        if is_well_formed_svg(raw) and authored_svg_reject_reason(raw) is None:
             continue
         salvaged = salvage_truncated_svg(raw)
-        if salvaged and is_well_formed_svg(salvaged):
+        if salvaged and authored_svg_reject_reason(salvaged) is None:
             path.write_text(
                 sanitize_svg_text(salvaged, strip_unsupported=strip_unsupported),
                 encoding="utf-8",
             )
             _log(log, f"[sanitize] salvaged truncated {path.name}")
         else:
-            _log(log, f"[sanitize] WARN unparseable {path.name}; export may still fail")
+            reason = authored_svg_reject_reason(raw) or "unparseable"
+            unparseable.append(f"{path.name}: {reason}")
+            _log(log, f"[sanitize] empty/invalid {path.name}: {reason}")
+
+    # Empty shells must never soft-pass or reach svg_to_pptx / svg-fallback.
+    if unparseable:
+        raise RuntimeError(
+            "empty/invalid SVG blocking export: " + "; ".join(unparseable)
+        )
+    assert_svg_dir_viable(svg_dir, log=log, context="pre-export")
 
     if gate_mode == "skip":
         _log(log, "[quality] quality-gate=skip：跳过质检与修复，直接导出")
@@ -2212,7 +2299,9 @@ def run_one_package(
                         {"role": "user", "content": user0},
                     ]
                     svg = ""
-                    for attempt in range(1, 3):
+                    raw = ""
+                    max_attempts = 3
+                    for attempt in range(1, max_attempts + 1):
                         raw = chat_text(
                             pool=pool,
                             model=cfg.model,
@@ -2223,6 +2312,29 @@ def run_one_package(
                         svg = _scrub_svg_image_refs(
                             svg, allowed=allowed_images, images_dir=images_dir
                         )
+                        reject = authored_svg_reject_reason(svg)
+                        if reject:
+                            _log(
+                                log,
+                                f"[svg] reject {file_name} attempt "
+                                f"{attempt}/{max_attempts}: {reject} "
+                                f"raw_len={len(raw or '')}",
+                            )
+                            if attempt >= max_attempts:
+                                break
+                            messages = messages + [
+                                {
+                                    "role": "assistant",
+                                    "content": (raw or "").strip() or "(empty)",
+                                },
+                                {
+                                    "role": "user",
+                                    "content": prompts.user_svg_empty_retry(
+                                        reason=reject
+                                    ),
+                                },
+                            ]
+                            continue
                         issues = audit_svg_image_fusion(
                             svg, prepared_image=prepared
                         )
@@ -2237,9 +2349,11 @@ def run_one_package(
                         fusion_critique = fusion_repair_brief(issues)
                         _log(
                             log,
-                            f"[svg] fusion retry {attempt}/2 {file_name}: "
-                            f"{issues[0]}",
+                            f"[svg] fusion retry {attempt}/{max_attempts} "
+                            f"{file_name}: {issues[0]}",
                         )
+                        if attempt >= max_attempts:
+                            break
                         # Same-thread follow-up: do not resend SYSTEM + style card.
                         messages = messages + [
                             {"role": "assistant", "content": raw},
@@ -2250,19 +2364,37 @@ def run_one_package(
                                 ),
                             },
                         ]
+                assert_authored_svg_viable(svg, label=file_name)
             return file_name, svg
 
         workers = _resolve_slide_concurrency(slide_concurrency, len(slides))
         _log(log, f"[svg] generating {len(slides)} pages concurrency={workers}")
+        write_failures: list[str] = []
         with ThreadPoolExecutor(max_workers=workers) as ex:
             futs = {ex.submit(gen_one, i, s): i for i, s in enumerate(slides, 1)}
             for fut in as_completed(futs):
                 i = futs[fut]
-                file_name, svg = fut.result()
+                try:
+                    file_name, svg = fut.result()
+                except Exception as exc:
+                    slide = slides[i - 1] if 0 <= i - 1 < len(slides) else {}
+                    name = str(slide.get("file") or f"{i:02d}_slide.svg")
+                    write_failures.append(f"{name}: {exc}")
+                    _log(log, f"[svg] FAIL {name}: {exc}")
+                    continue
                 cleaned = sanitize_svg_text(svg)
                 cleaned = _scrub_svg_image_refs(
                     cleaned, allowed=allowed_images, images_dir=images_dir
                 )
+                reject = authored_svg_reject_reason(cleaned)
+                if reject:
+                    # Never persist declaration-only shells.
+                    write_failures.append(f"{file_name}: {reject}")
+                    _log(
+                        log,
+                        f"[svg] write blocked {file_name}: {reject}",
+                    )
+                    continue
                 # 最终再扫一遍融合问题（仅告警；重试已在 gen_one）
                 from ppt_master.image_fusion import audit_svg_image_fusion
 
@@ -2284,6 +2416,13 @@ def run_one_package(
                             log,
                             enable_repair=enable_repair and not use_mock,
                         )
+
+        if write_failures:
+            raise RuntimeError(
+                "SVG authoring failed for "
+                f"{len(write_failures)} page(s): " + "; ".join(write_failures)
+            )
+        assert_svg_dir_viable(svg_dir, log=log, context="post-author")
 
         # Ensure image worker finished (no-image-only decks already set the event).
         images_done.wait()
@@ -2331,7 +2470,15 @@ def run_one_package(
                 category=str(plan.get("category") or ""),
             )
         except Exception as exc:
-            if gate_mode == "strict":
+            msg = str(exc)
+            # Empty / ill-formed pages are hard failures in every gate mode —
+            # never package them as svg-fallback "success".
+            if (
+                gate_mode == "strict"
+                or "empty/invalid SVG" in msg
+                or "SVG authoring failed" in msg
+                or "SVG not viable" in msg
+            ):
                 raise
             _log(
                 log,

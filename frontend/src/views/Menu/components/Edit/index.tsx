@@ -4,6 +4,11 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useSlideSelectionStore } from "@/store";
 import {
@@ -21,13 +26,79 @@ import {
   TextBold,
   TextItalic,
   TextUnderline,
-  Up,
 } from "@icon-park/react";
-import { AArrowDown, AArrowUp } from "lucide-react";
 import { useDebounceFn, useMemoizedFn } from "ahooks";
 import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import { HexColorInput, HexColorPicker } from "react-colorful";
 import { useTranslation } from "react-i18next";
+
+/** 增大字号：描边字母 A + 加号（避免 lucide AArrow 被 fill 染成实心三角） */
+const FontSizeIncreaseIcon: FC<{ size?: number }> = ({ size = 18 }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    aria-hidden
+  >
+    <path
+      d="M3.8 18 8.2 6.5h1.6L14.2 18"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      fill="none"
+    />
+    <path
+      d="M5.6 13.8h6.8"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      fill="none"
+    />
+    <path
+      d="M18 7.2v7.6M14.2 11h7.6"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      fill="none"
+    />
+  </svg>
+);
+
+/** 减小字号：描边字母 A + 减号 */
+const FontSizeDecreaseIcon: FC<{ size?: number }> = ({ size = 18 }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    aria-hidden
+  >
+    <path
+      d="M3.8 18 8.2 6.5h1.6L14.2 18"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      fill="none"
+    />
+    <path
+      d="M5.6 13.8h6.8"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      fill="none"
+    />
+    <path
+      d="M14.2 11h7.6"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      fill="none"
+    />
+  </svg>
+);
 
 const FONT_SIZE_PRESETS = [
   12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72, 96,
@@ -86,7 +157,6 @@ export const Edit: FC = () => {
     () => readStyleFlags(selected?.computedStyles),
     [selected?.computedStyles],
   );
-  const buttonColor = colorOpen ? draftColor : flags.color;
   const sizeOptions = useMemo(
     () => buildSizeOptions(flags.fontSize),
     [flags.fontSize],
@@ -251,10 +321,10 @@ export const Edit: FC = () => {
 
       <PanelSplitLine />
 
-      {/* Font size: input + steppers + hover presets + A↑ A↓ */}
+      {/* Font size: 上方数值/预设，下方 A+ / A− */}
       <div
         className={cn(
-          "flex h-full items-center gap-1",
+          "flex h-full min-w-[76px] shrink-0 flex-col items-stretch justify-center gap-1 px-0.5",
           !enabled && "pointer-events-none opacity-40",
         )}
       >
@@ -271,7 +341,7 @@ export const Edit: FC = () => {
         >
           <PopoverAnchor asChild>
             <div
-              className="flex h-[36px] items-center rounded-[6px] border border-[var(--border-default)] bg-[var(--input-bg)]"
+              className="flex h-[22px] items-center overflow-hidden rounded-[4px] border border-[var(--border-default)] bg-[var(--input-bg)] leading-none"
               onMouseEnter={openSizePopover}
               onMouseLeave={scheduleCloseSizePopover}
             >
@@ -281,7 +351,7 @@ export const Edit: FC = () => {
                 disabled={!enabled}
                 value={sizeInput}
                 aria-label={t("editPanel.fontSize")}
-                className="h-full w-[42px] bg-transparent px-2 text-center text-[13px] text-chrome-text outline-none"
+                className="h-full w-[48px] bg-transparent px-1.5 text-center text-[13px] tabular-nums text-chrome-text outline-none"
                 onChange={(e) => {
                   const raw = e.target.value.replace(/[^\d]/g, "");
                   setSizeInput(raw);
@@ -310,31 +380,12 @@ export const Edit: FC = () => {
                   }
                 }}
               />
-              <div className="flex h-full flex-col border-l border-[var(--border-default)]">
-                <button
-                  type="button"
-                  disabled={!enabled}
-                  className="flex h-1/2 w-5 items-center justify-center text-[var(--icon-color)] hover:bg-[var(--hover-bg)]"
-                  aria-label={t("editPanel.increaseFontSize")}
-                  onClick={() => nudgeFontSizeInput(1)}
-                >
-                  <Up theme="outline" size="10" fill="currentColor" />
-                </button>
-                <button
-                  type="button"
-                  disabled={!enabled}
-                  className="flex h-1/2 w-5 items-center justify-center border-t border-[var(--border-default)] text-[var(--icon-color)] hover:bg-[var(--hover-bg)]"
-                  aria-label={t("editPanel.decreaseFontSize")}
-                  onClick={() => nudgeFontSizeInput(-1)}
-                >
-                  <Down theme="outline" size="10" fill="currentColor" />
-                </button>
-              </div>
               <button
                 type="button"
                 disabled={!enabled}
-                className="flex h-full w-6 items-center justify-center border-l border-[var(--border-default)] text-[var(--icon-color)] hover:bg-[var(--hover-bg)]"
+                className="flex h-full w-5 items-center justify-center border-l border-[var(--border-default)] text-[var(--icon-color)] hover:bg-[var(--hover-bg)]"
                 aria-label={t("editPanel.fontSizePresets")}
+                aria-expanded={sizeOpen}
                 onMouseEnter={openSizePopover}
               >
                 <Down
@@ -391,18 +442,40 @@ export const Edit: FC = () => {
           </PopoverContent>
         </Popover>
 
-        <PanelLargeButton
-          title={t("editPanel.increaseFontSize")}
-          disabled={!enabled}
-          icon={<AArrowUp className="size-[18px]" strokeWidth={1.75} />}
-          onClick={() => void applyTextStyle({ fontSize: "increase" })}
-        />
-        <PanelLargeButton
-          title={t("editPanel.decreaseFontSize")}
-          disabled={!enabled}
-          icon={<AArrowDown className="size-[18px]" strokeWidth={1.75} />}
-          onClick={() => void applyTextStyle({ fontSize: "decrease" })}
-        />
+        <div className="flex items-center justify-center gap-0.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                disabled={!enabled}
+                aria-label={t("editPanel.increaseFontSize")}
+                className="flex h-[22px] flex-1 items-center justify-center rounded-[4px] text-[var(--icon-color)] hover:bg-[var(--primary-soft)] hover:text-[var(--primary-color)] disabled:pointer-events-none"
+                onClick={() => void applyTextStyle({ fontSize: "increase" })}
+              >
+                <FontSizeIncreaseIcon size={16} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {t("editPanel.increaseFontSize")}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                disabled={!enabled}
+                aria-label={t("editPanel.decreaseFontSize")}
+                className="flex h-[22px] flex-1 items-center justify-center rounded-[4px] text-[var(--icon-color)] hover:bg-[var(--primary-soft)] hover:text-[var(--primary-color)] disabled:pointer-events-none"
+                onClick={() => void applyTextStyle({ fontSize: "decrease" })}
+              >
+                <FontSizeDecreaseIcon size={16} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              {t("editPanel.decreaseFontSize")}
+            </TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       <PanelSplitLine />
@@ -460,21 +533,11 @@ export const Edit: FC = () => {
               active={colorOpen}
               disabled={!enabled}
               icon={
-                <span className="relative inline-flex text-current">
-                  <BackgroundColor
-                    theme="outline"
-                    size="18"
-                    fill="currentColor"
-                  />
-                  <span
-                    className="absolute bottom-0 left-0.5 right-0.5 h-[3px] rounded-[1px]"
-                    style={{
-                      background: enabled
-                        ? buttonColor
-                        : "var(--text-disabled)",
-                    }}
-                  />
-                </span>
+                <BackgroundColor
+                  theme="outline"
+                  size="18"
+                  fill="currentColor"
+                />
               }
             />
           </div>
@@ -489,17 +552,6 @@ export const Edit: FC = () => {
           onMouseLeave={scheduleCloseColorPopover}
         >
           <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[12px] text-chrome-muted">
-                {t("editPanel.color")}
-              </span>
-              <span
-                className="h-4 w-4 shrink-0 rounded-sm border border-[var(--border-default)]"
-                style={{ background: draftColor }}
-                title={draftColor}
-              />
-            </div>
-
             <HexColorPicker
               color={draftColor}
               onChange={onPickerChange}

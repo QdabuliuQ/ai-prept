@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -92,7 +93,7 @@ def test_prompt_includes_issue_and_constraints() -> None:
     assert "editorial" in user
 
 
-def test_mock_rewrite_writes_backup_and_comment(tmp_path: Path) -> None:
+def test_mock_rewrite_writes_slide_and_meta(tmp_path: Path) -> None:
     pack = _write_pack(tmp_path)
     row = run_page_rewrite(
         pack,
@@ -105,8 +106,7 @@ def test_mock_rewrite_writes_backup_and_comment(tmp_path: Path) -> None:
     html = (pack / "slides" / "cover.html").read_text(encoding="utf-8")
     assert "page-rewrite mock" in html
     assert "拉开间距" in html
-    bak = pack / "slides" / "_rewrites"
-    assert bak.is_dir()
-    assert any(bak.iterdir())
+    assert not (pack / "slides" / "_rewrites").exists()
     meta = (pack / "template.json").read_text(encoding="utf-8")
     assert "last_page_rewrite" in meta
+    assert "backup" not in json.loads(meta).get("last_page_rewrite", {})

@@ -17,6 +17,7 @@ import {
   useRemarkEditActiveStore,
   useThemeStore,
 } from "@/store";
+import { useFilePreviewStore } from "@/store/zustand/filePreviewStore";
 import type { Page } from "@/store/ppt";
 import { initPPTStore } from "@/utils/initStore";
 import { buildBlankSlideHtml } from "@/utils/slideHtml";
@@ -48,6 +49,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { PreviewCanvas } from "./PreviewCanvas";
+import { AssetPreview } from "./AssetPreview";
 import { RemarkEdit } from "./RemarkEdit";
 
 interface CanvasProps {
@@ -61,6 +63,7 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
   // 使用 Zustand hooks 订阅状态变化
   const pages = usePPTStore((state) => state.pages);
   const pageActive = usePageActiveStore((state) => state.pageActive);
+  const filePreview = useFilePreviewStore((state) => state.preview);
   const horizontalLineFromStore = usePPTStore((state) => state.horizontalLine);
   const verticalLineFromStore = usePPTStore((state) => state.verticalLine);
 
@@ -68,6 +71,8 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
   const fitScale = useCanvasZoomStore((state) => state.fitScale);
   const zoomPercent = useCanvasZoomStore((state) => state.zoomPercent);
   const setFitScale = useCanvasZoomStore((state) => state.setFitScale);
+  const setZoomPercent = useCanvasZoomStore((state) => state.setZoomPercent);
+  const panResetNonce = useCanvasZoomStore((state) => state.panResetNonce);
   // edit 模式：适配缩放 × 用户百分比；其他模式本地占位
   const scale =
     mode === "edit"
@@ -80,6 +85,11 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [spacePressed, setSpacePressed] = useState(false);
+  /** 手势缩放/滚轮平移时关掉 transform transition，避免拖影 */
+  const [suppressTransition, setSuppressTransition] = useState(false);
+  const gestureTransitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const panStartRef = useRef<{
     x: number;
     y: number;
@@ -88,7 +98,28 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
     pointerId: number;
   } | null>(null);
   const didPanRef = useRef(false);
+  const panOffsetRef = useRef(panOffset);
+  const scaleRef = useRef(scale);
+  const zoomPercentRef = useRef(zoomPercent);
+  panOffsetRef.current = panOffset;
+  scaleRef.current = scale;
+  zoomPercentRef.current = zoomPercent;
   const canPanCanvas = mode === "edit" && zoomPercent > 100;
+
+  const clampPan = useMemoizedFn((x: number, y: number) => {
+    const parent = containerRef.current;
+    if (!parent) return { x, y };
+    const { width, height } = parent.getBoundingClientRect();
+    const currentScale = scaleRef.current;
+    const scaledW = CANVAS_WIDTH * currentScale;
+    const scaledH = CANVAS_HEIGHT * currentScale;
+    const maxX = Math.max(40, (scaledW - width) / 2 + 80);
+    const maxY = Math.max(40, (scaledH - height) / 2 + 80);
+    return {
+      x: Math.min(maxX, Math.max(-maxX, x)),
+      y: Math.min(maxY, Math.max(-maxY, y)),
+    };
+  });
 
   // 计算容器适配缩放：由外部容器决定最大等比例尺寸，四周至少保留 20px
   const calculateScale = useMemoizedFn(() => {
@@ -134,12 +165,17 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
     setTimeout(calculateScale, 0);
   }, [calculateScale]);
 
-  // 缩放回到适配及以下时重置平移
+  // 缩放回到适配及以下时重置平移；底部「重置」也会递增 panResetNonce
   useEffect(() => {
     if (zoomPercent <= 100) {
       setPanOffset({ x: 0, y: 0 });
     }
   }, [zoomPercent]);
+
+  useEffect(() => {
+    if (panResetNonce === 0) return;
+    setPanOffset({ x: 0, y: 0 });
+  }, [panResetNonce]);
 
   // Space 进入平移模式（放大时）
   useEffect(() => {
@@ -173,7 +209,18 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
     };
   }, [mode]);
 
-  // 画布区域滚轮：向上上一页，向下下一页（固定冷却，不因持续滚动延长锁定）
+  const bumpViewportGesture = useMemoizedFn(() => {
+    setSuppressTransition(true);
+    if (gestureTransitionTimerRef.current) {
+      clearTimeout(gestureTransitionTimerRef.current);
+    }
+    gestureTransitionTimerRef.current = setTimeout(() => {
+      setSuppressTransition(false);
+      gestureTransitionTimerRef.current = null;
+    }, 140);
+  });
+
+  // 画布滚轮（仅父页面）：捏合/Ctrl+滚轮改 canvas scale；放大时双指平移；适配态翻页
   useEffect(() => {
     if (mode !== "edit") return;
     const el = containerRef.current;
@@ -195,8 +242,71 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
     };
 
     const onWheel = (e: WheelEvent) => {
-      // 保留 Ctrl/Meta + 滚轮给浏览器缩放
-      if (e.ctrlKey || e.metaKey) return;
+      // 触控板捏合在多数浏览器里表现为 ctrlKey + wheel
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        e.stopPropagation();
+        bumpViewportGesture();
+
+        const prevPercent = zoomPercentRef.current;
+        const prevScale = scaleRef.current;
+        const prevPan = panOffsetRef.current;
+        const { fitScale: fs } = useCanvasZoomStore.getState();
+
+        let dy = e.deltaY;
+        if (e.deltaMode === 1) dy *= 16;
+        else if (e.deltaMode === 2) dy *= 40;
+
+        const nextPercent = Math.min(
+          200,
+          Math.max(10, Math.round(prevPercent * Math.exp(-dy * 0.008))),
+        );
+        if (nextPercent === prevPercent) return;
+
+        const nextScale = Math.max(fs * (nextPercent / 100), 0.1);
+        setZoomPercent(nextPercent);
+
+        if (nextPercent <= 100) {
+          setPanOffset({ x: 0, y: 0 });
+          return;
+        }
+
+        // 以光标为锚点：父容器 transform translate+scale，iframe 跟着一起变
+        const bounds = el.getBoundingClientRect();
+        const cx = e.clientX - (bounds.left + bounds.width / 2);
+        const cy = e.clientY - (bounds.top + bounds.height / 2);
+        const ratio = nextScale / prevScale;
+        scaleRef.current = nextScale;
+        zoomPercentRef.current = nextPercent;
+        const nextPan = clampPan(
+          cx - (cx - prevPan.x) * ratio,
+          cy - (cy - prevPan.y) * ratio,
+        );
+        panOffsetRef.current = nextPan;
+        setPanOffset(nextPan);
+        return;
+      }
+
+      // 放大后：双指/滚轮平移画布
+      if (zoomPercentRef.current > 100) {
+        e.preventDefault();
+        bumpViewportGesture();
+        let dx = e.deltaX;
+        let dy = e.deltaY;
+        if (e.deltaMode === 1) {
+          dx *= 16;
+          dy *= 16;
+        } else if (e.deltaMode === 2) {
+          dx *= 40;
+          dy *= 40;
+        }
+        const prev = panOffsetRef.current;
+        const next = clampPan(prev.x - dx, prev.y - dy);
+        panOffsetRef.current = next;
+        setPanOffset(next);
+        return;
+      }
+
       if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
 
       e.preventDefault();
@@ -205,7 +315,6 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
         e.deltaY > 0 ? 1 : e.deltaY < 0 ? -1 : 0;
       if (!direction) return;
 
-      // 冷却期内同向滚动（含惯性）忽略；换向视为新手势，立即允许翻页
       if (locked && direction === lastDirection) return;
 
       lastDirection = direction;
@@ -224,7 +333,15 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
       el.removeEventListener("wheel", onWheel);
       if (cooldownTimer) clearTimeout(cooldownTimer);
     };
-  }, [mode]);
+  }, [mode, bumpViewportGesture, clampPan, setZoomPercent]);
+
+  useEffect(() => {
+    return () => {
+      if (gestureTransitionTimerRef.current) {
+        clearTimeout(gestureTransitionTimerRef.current);
+      }
+    };
+  }, []);
 
   // 监听全局点击事件，关闭右键菜单
   // 注意：react-contexify 已经内置了点击外部关闭菜单的功能
@@ -560,25 +677,11 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
       ...baseStyle,
       transform: `translate(${panX}px, ${panY}px) scale(${computedScale})`,
       transformOrigin: "center center",
-      transition: isPanning ? "none" : undefined,
+      transition: isPanning || suppressTransition ? "none" : undefined,
     };
   };
 
   const canvasStyle = getCanvasStyle();
-
-  const clampPan = useMemoizedFn((x: number, y: number) => {
-    const parent = containerRef.current;
-    if (!parent) return { x, y };
-    const { width, height } = parent.getBoundingClientRect();
-    const scaledW = CANVAS_WIDTH * scale;
-    const scaledH = CANVAS_HEIGHT * scale;
-    const maxX = Math.max(40, (scaledW - width) / 2 + 80);
-    const maxY = Math.max(40, (scaledH - height) / 2 + 80);
-    return {
-      x: Math.min(maxX, Math.max(-maxX, x)),
-      y: Math.min(maxY, Math.max(-maxY, y)),
-    };
-  });
 
   const startPan = useMemoizedFn((e: React.PointerEvent) => {
     e.preventDefault();
@@ -652,7 +755,7 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
     return (
       <HtmlSlideFrame
         page={currentPage as Page}
-        pointerEventsNone={!canEdit}
+        pointerEventsNone={!canEdit || spacePressed || isPanning}
         editable={canEdit}
         title={`slide-${currentPage.id}`}
       />
@@ -1501,6 +1604,10 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
       className={`h-full flex-1 relative m-0 p-0 ${mode === "edit" ? "bg-transparent" : "bg-chrome-guide"}`}
       id={mode === "edit" ? "ruler-container" : undefined}
     >
+      {mode === "edit" && filePreview ? (
+        <AssetPreview />
+      ) : (
+        <>
       {/* resize 时的蒙层 */}
       {mode === "edit" && (
         <div
@@ -1650,6 +1757,8 @@ const Component: FC<CanvasProps> = ({ mode = "edit", page, previewZoom }) => {
       </div>
       {mode === "edit" && remarkEditActive && (
         <RemarkEdit value={localRemark} onChange={handleRemarkChange} />
+      )}
+        </>
       )}
     </div>
   );

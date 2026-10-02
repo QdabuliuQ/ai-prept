@@ -760,6 +760,7 @@ def remix_template_package(
     mock: bool | None = None,
     skip_images: bool = False,
     status: str = "pending",
+    ephemeral: bool = False,
     log: LogFn | None = None,
 ) -> dict[str, Any]:
     """Clone source pack and rewrite text/image slots for prompt."""
@@ -883,7 +884,14 @@ def remix_template_package(
         "prompt": prompt[:2000],
         "in_progress": True,
     }
-    new_meta.pop("storage", None)
+    if ephemeral:
+        new_meta["ephemeral"] = True
+        new_meta["storage"] = {
+            "backend": "session",
+            "path": f"workspace/{new_id}",
+        }
+    else:
+        new_meta.pop("storage", None)
     new_meta.pop("preview", None)
     if isinstance(pages, list):
         new_meta["slides"] = pages
@@ -1018,6 +1026,7 @@ def run_remix(
     mock: bool | None = None,
     skip_images: bool = False,
     status: str = "pending",
+    ephemeral: bool = False,
     log: LogFn | None = None,
 ) -> dict[str, Any]:
     from ppt_master.paths import repo_root
@@ -1039,5 +1048,6 @@ def run_remix(
         mock=mock,
         skip_images=skip_images,
         status=status,
+        ephemeral=ephemeral,
         log=log,
     )

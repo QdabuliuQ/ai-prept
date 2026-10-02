@@ -29,18 +29,17 @@ export const PanelLargeButton: FC<IPanelLargeButtonProps> = ({
     if (!disabled) onClick?.();
   });
 
-  const iconFill = disabled
-    ? "var(--text-disabled)"
-    : active
-      ? "var(--primary-color)"
-      : "var(--icon-color)";
-
   const renderIcon = useMemo(() => {
     if (!isValidElement(icon)) return icon;
-    return cloneElement(icon as ReactElement<{ fill?: string }>, {
-      fill: iconFill,
-    });
-  }, [icon, iconFill]);
+    const props = icon.props as { fill?: string };
+    // 用 currentColor，使 group-hover:text / active 的文字色同时驱动描边图标
+    if (props.fill != null && props.fill !== "none") {
+      return cloneElement(icon as ReactElement<{ fill?: string }>, {
+        fill: disabled ? "var(--text-disabled)" : "currentColor",
+      });
+    }
+    return icon;
+  }, [icon, disabled]);
 
   return (
     <Button

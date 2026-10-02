@@ -14,7 +14,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from admin.fsutil import jobs_dir, repo_root, templates_root
+from admin.fsutil import (
+    cleanup_expired_sessions,
+    jobs_dir,
+    repo_root,
+    templates_root,
+    workspace_root,
+)
 from admin.providers import (
     image_env_for_selection,
     llm_env_for_dual,
@@ -32,7 +38,7 @@ def _now() -> str:
 
 
 _FAIL_LINE_RE = re.compile(
-    r"(?:\[(?:remix|rewrite-page|style|pack)[^\]]*\]\s+)?FAIL\s*[—\-]\s*(.+)\s*$",
+    r"(?:\[(?:remix|rewrite-page|generate-page|delete-page|editor-assist|style|pack)[^\]]*\]\s+)?FAIL\s*[—\-]\s*(.+)\s*$",
     re.IGNORECASE | re.MULTILINE,
 )
 _MSG_IN_QUOTES_RE = re.compile(
@@ -195,21 +201,75 @@ def delete_job(job_id: str) -> None:
     (jobs_dir() / f"{job_id}-report.json").unlink(missing_ok=True)
 
 
-def mark_job_converted(job_id: str) -> dict[str, Any]:
-    """Browser HTML convert finished → mark job succeeded."""
+def mark_job_converted(
+    job_id: str, template_id: str | None = None
+) -> dict[str, Any]:
+    """Browser HTML convert finished for one (or the only) pending template."""
     job = get_job(job_id)
     if not job:
         raise FileNotFoundError("NOT_FOUND")
-    if job.get("status") not in ("awaiting_html", "succeeded"):
-        raise RuntimeError(f"JOB_NOT_AWAITING_HTML:{job.get('status')}")
-    job["status"] = "succeeded"
-    job["needsBrowserConvert"] = False
-    job["finishedAt"] = job.get("finishedAt") or _now()
-    job["log"] = (job.get("log") or "") + "\n[browser-html] convert complete → succeeded\n"
+    status = str(job.get("status") or "")
+    if status not in ("awaiting_html", "succeeded", "running"):
+        raise RuntimeError(f"JOB_NOT_AWAITING_HTML:{status}")
+
+    pending = [str(x) for x in (job.get("pendingConvertIds") or []) if str(x).strip()]
+    single = str(job.get("convertTemplateId") or "").strip()
+    if single and single not in pending:
+        pending.append(single)
+
+    tid = str(template_id or "").strip()
+    if not tid and pending:
+        tid = pending[0]
+    if tid and tid in pending:
+        pending = [x for x in pending if x != tid]
+
+    job["pendingConvertIds"] = pending
+    if pending:
+        job["convertTemplateId"] = pending[0]
+        job["needsBrowserConvert"] = True
+        # Still generating more packs → keep running; else wait for remaining converts.
+        if status != "running":
+            job["status"] = "awaiting_html"
+        job["log"] = (job.get("log") or "") + (
+            f"\n[browser-html] converted {tid or '?'} · remaining={len(pending)}\n"
+        )
+    else:
+        job["convertTemplateId"] = None
+        job["needsBrowserConvert"] = False
+        job["log"] = (job.get("log") or "") + (
+            f"\n[browser-html] convert complete"
+            f"{f' ({tid})' if tid else ''} → "
+            f"{'still running' if status == 'running' else 'succeeded'}\n"
+        )
+        if status != "running":
+            job["status"] = "succeeded"
+            job["finishedAt"] = job.get("finishedAt") or _now()
+
     with _lock:
         _jobs[job_id] = job
     _persist(job)
     return dict(job)
+
+
+def _enqueue_browser_converts(job: dict[str, Any], rows: list[dict[str, Any]]) -> list[str]:
+    """Queue template ids that need browser PPTX→HTML. Returns newly queued ids."""
+    pending = [str(x) for x in (job.get("pendingConvertIds") or []) if str(x).strip()]
+    added: list[str] = []
+    for r in rows:
+        if not isinstance(r, dict) or not r.get("needs_browser_convert"):
+            continue
+        tid = str(r.get("template_id") or "").strip()
+        if not tid or tid in pending:
+            continue
+        pending.append(tid)
+        added.append(tid)
+        if r.get("pptx"):
+            job["pptxPath"] = str(r["pptx"])
+    if pending:
+        job["pendingConvertIds"] = pending
+        job["needsBrowserConvert"] = True
+        job["convertTemplateId"] = pending[0]
+    return added
 
 
 def delete_jobs(ids: list[str]) -> dict[str, Any]:
@@ -385,34 +445,31 @@ def _spawn(job: dict[str, Any], args: list[str], extra_env: dict[str, str]) -> d
                         if ids:
                             cur["templateIds"] = ids
                             cur["templateId"] = ids[0]
-                        for r in rows:
-                            if not isinstance(r, dict):
-                                continue
+                        dict_rows = [r for r in rows if isinstance(r, dict)]
+                        for r in dict_rows:
                             tid = r.get("template_id")
-                            # 成功完整包立即入库；需浏览器转 HTML 的 stub 不进列表
-                            if (
-                                tid
-                                and r.get("ok")
-                                and not r.get("needs_browser_convert")
-                            ):
+                            # 成功完整包立即入库；需浏览器转 HTML 的 stub 也入库（页数 0，等转换）
+                            if tid and r.get("ok"):
                                 upsert_ids.append(str(tid))
-                            if code == 0 and r.get("needs_browser_convert") and (
-                                r.get("pptx") or r.get("template_id")
-                            ):
-                                cur["needsBrowserConvert"] = True
-                                if r.get("pptx"):
-                                    cur["pptxPath"] = str(r["pptx"])
-                                if r.get("template_id"):
-                                    cur["convertTemplateId"] = str(r["template_id"])
-                                cur["status"] = "awaiting_html"
-                                break
+                        added = _enqueue_browser_converts(cur, dict_rows)
+                        if code == 0 and added:
+                            cur["status"] = "awaiting_html"
+                            _append_log(
+                                cur,
+                                f"[browser-html] queued: {', '.join(added)}\n",
+                            )
                 except (OSError, json.JSONDecodeError):
                     pass
             _jobs[cur["id"]] = cur
             _persist(cur)
             _children.pop(cur["id"], None)
             # 每包成功即入库（整批部分失败时成功包仍进待审核）
-            if cur.get("status") != "awaiting_html" and upsert_ids:
+            # 首页 gallery remix / 编辑器对话写 sessions 或不入库
+            if (
+                upsert_ids
+                and not cur.get("gallery")
+                and not cur.get("editor")
+            ):
                 try:
                     from admin.store import upsert_template_row
 
@@ -454,7 +511,7 @@ def _build_ppt_master_args(
         "--report",
         str(report_path),
         "--slide-concurrency",
-        "6",
+        "3",
     ]
     if ensure_style:
         args.append("--ensure-style")
@@ -681,13 +738,15 @@ def _spawn_per_pack_random(
 
             pack_ok = code == 0
             pack_tids: list[str] = []
+            pack_rows: list[dict[str, Any]] = []
             if pack_report.is_file():
                 try:
                     rows = json.loads(pack_report.read_text(encoding="utf-8"))
                     if isinstance(rows, list):
-                        all_rows.extend(r for r in rows if isinstance(r, dict))
-                        for r in rows:
-                            if isinstance(r, dict) and r.get("template_id"):
+                        pack_rows = [r for r in rows if isinstance(r, dict)]
+                        all_rows.extend(pack_rows)
+                        for r in pack_rows:
+                            if r.get("template_id"):
                                 tid = str(r["template_id"])
                                 pack_tids.append(tid)
                                 with _lock:
@@ -704,7 +763,7 @@ def _spawn_per_pack_random(
                     pass
             if pack_ok:
                 ok += 1
-                # 每包成功即入库，避免整批有失败时成功包不出现在待审核列表
+                # 每包成功即入库，并立刻把需浏览器转 HTML 的包排队（前端边生成边转）
                 try:
                     from admin.store import upsert_template_row
 
@@ -712,6 +771,16 @@ def _spawn_per_pack_random(
                         upsert_template_row(tid)
                 except Exception:
                     pass
+                with _lock:
+                    cur = _jobs.get(job["id"]) or job
+                    added = _enqueue_browser_converts(cur, pack_rows)
+                    if added:
+                        _append_log(
+                            cur,
+                            f"[browser-html] queued now: {', '.join(added)}\n",
+                        )
+                    _jobs[job["id"]] = cur
+                    _persist(cur)
             else:
                 fail += 1
             with _lock:
@@ -747,11 +816,26 @@ def _spawn_per_pack_random(
                 return
             cur["finishedAt"] = _now()
             cur["exitCode"] = 0 if fail == 0 and ok > 0 else 1
+            # Catch any convert flags missed mid-flight
+            _enqueue_browser_converts(cur, all_rows)
+            pending = [
+                str(x)
+                for x in (cur.get("pendingConvertIds") or [])
+                if str(x).strip()
+            ]
             if fail == 0 and ok > 0:
-                cur["status"] = "succeeded"
-                if cur.get("progress"):
-                    cur["progress"]["done"] = total
-                    cur["progress"]["percent"] = 100
+                if pending:
+                    cur["status"] = "awaiting_html"
+                    cur["needsBrowserConvert"] = True
+                    cur["convertTemplateId"] = pending[0]
+                    if cur.get("progress"):
+                        cur["progress"]["done"] = total
+                        cur["progress"]["percent"] = 100
+                else:
+                    cur["status"] = "succeeded"
+                    if cur.get("progress"):
+                        cur["progress"]["done"] = total
+                        cur["progress"]["percent"] = 100
             else:
                 cur["status"] = "failed"
                 cur["error"] = _error_from_log(
@@ -876,10 +960,11 @@ def start_generate_job(options: dict[str, Any]) -> dict[str, Any]:
         if not skip_image:
             extra.update(image_env_for_selection(image))
 
-    if per_pack_random:
+    if per_pack_random or count > 1:
         job["log"] += (
-            f"[pipeline] ppt-master · per-pack random "
-            f"(theme_reroll={reroll_theme} style_reroll={reroll_style})\n"
+            f"[pipeline] ppt-master · serial packs ×{count} "
+            f"(theme_reroll={reroll_theme} style_reroll={reroll_style}; "
+            "each pack can browser-convert immediately)\n"
         )
         return _spawn_per_pack_random(
             job,
@@ -936,6 +1021,14 @@ def start_remix_job(options: dict[str, Any]) -> dict[str, Any]:
 
     mock = bool(options.get("mock"))
     skip_image = options.get("skipImage") is not False
+    gallery = bool(options.get("gallery"))
+    # 首页 remix → workspace/；Admin「使用模板」仍写模板库目录
+    out_root = workspace_root() if gallery else templates_root()
+    if gallery:
+        try:
+            cleanup_expired_sessions()
+        except Exception:
+            pass
     llm = resolve_llm_selection(options.get("llmProvider"), options.get("llmModel"))
     image = resolve_image_selection(options.get("imageProvider"), options.get("imageModel"))
     if not mock:
@@ -962,7 +1055,7 @@ def start_remix_job(options: dict[str, Any]) -> dict[str, Any]:
         "imageLabel": image["label"],
         "status": "queued",
         "createdAt": _now(),
-        "outputDir": str(templates_root()),
+        "outputDir": str(out_root),
         "log": "",
         "progress": _initial_progress(1),
     }
@@ -970,12 +1063,14 @@ def start_remix_job(options: dict[str, Any]) -> dict[str, Any]:
         "remix-template",
         source_id,
         "--out-root",
-        str(templates_root()),
+        str(out_root),
         "--report",
         str(report_path),
         "--prompt",
         hint,
     ]
+    if gallery:
+        args.append("--ephemeral")
     if mock:
         args.append("--mock")
     if skip_image:
@@ -993,12 +1088,17 @@ def start_remix_job(options: dict[str, Any]) -> dict[str, Any]:
         extra.update(llm_env_for_dual(llm))
         if not skip_image:
             extra.update(image_env_for_selection(image))
-    job["log"] += f"[remix] source={source_id}\n"
-    job["gallery"] = bool(options.get("gallery"))
+    job["log"] += (
+        f"[remix] source={source_id}"
+        + (" out=sessions (ephemeral)\n" if gallery else "\n")
+    )
+    job["gallery"] = gallery
     return _spawn(job, args, extra)
 
 
 def start_rewrite_page_job(options: dict[str, Any]) -> dict[str, Any]:
+    from admin.fsutil import template_dir as resolve_pack
+
     source_id = str(options.get("sourceTemplateId") or options.get("templateId") or "").strip()
     if not source_id:
         raise RuntimeError("缺少模板 id")
@@ -1008,7 +1108,7 @@ def start_rewrite_page_job(options: dict[str, Any]) -> dict[str, Any]:
     if len(issue) > 2000:
         raise RuntimeError("问题描述过长（最多 2000 字）")
 
-    source = templates_root() / source_id
+    source = resolve_pack(source_id)
     meta_path = source / "template.json"
     if not meta_path.is_file():
         raise RuntimeError(f"源模板不存在：{source_id}")
@@ -1087,6 +1187,303 @@ def start_rewrite_page_job(options: dict[str, Any]) -> dict[str, Any]:
         extra.setdefault("LLM_THINKING", "0")
     job["log"] += (
         f"[rewrite-page] template={source_id} "
+        f"file={slide_file or '-'} pageIndex={page_index if page_index is not None else '-'}\n"
+    )
+    if options.get("editor"):
+        job["editor"] = True
+    return _spawn(job, args, extra)
+
+
+def start_generate_page_job(options: dict[str, Any]) -> dict[str, Any]:
+    from admin.fsutil import template_dir as resolve_pack
+
+    source_id = str(options.get("sourceTemplateId") or options.get("templateId") or "").strip()
+    if not source_id:
+        raise RuntimeError("缺少模板 id")
+    issue = (options.get("issue") or options.get("prompt") or "").strip()
+    if len(issue) < 4:
+        raise RuntimeError("请填写新页要求（至少 4 字）")
+    if len(issue) > 2000:
+        raise RuntimeError("问题描述过长（最多 2000 字）")
+
+    source = resolve_pack(source_id)
+    meta_path = source / "template.json"
+    if not meta_path.is_file():
+        raise RuntimeError(f"源模板不存在：{source_id}")
+
+    after_file = str(options.get("afterFile") or options.get("file") or "").strip() or None
+    after_page_index = options.get("afterPageIndex")
+    if after_page_index is None:
+        after_page_index = options.get("pageIndex")
+    if after_page_index is not None and after_page_index != "":
+        try:
+            after_page_index = int(after_page_index)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("afterPageIndex 必须是整数") from exc
+    else:
+        after_page_index = None
+
+    title_hint = str(options.get("titleHint") or options.get("title") or "").strip() or None
+    mock = bool(options.get("mock"))
+    llm = resolve_llm_selection(options.get("llmProvider"), options.get("llmModel"))
+    image = resolve_image_selection(options.get("imageProvider"), options.get("imageModel"))
+    if not mock:
+        llm_env_for_dual(llm)
+
+    job_id = uuid.uuid4().hex[:12]
+    report_path = jobs_dir() / f"{job_id}-report.json"
+    job: dict[str, Any] = {
+        "id": job_id,
+        "prompt": issue,
+        "issue": issue,
+        "mock": mock,
+        "skipImage": True,
+        "packageFormat": "ppt-master",
+        "pipeline": "generate-page",
+        "sourceTemplateId": source_id,
+        "templateId": source_id,
+        "afterFile": after_file,
+        "afterPageIndex": after_page_index,
+        "titleHint": title_hint,
+        "count": 1,
+        "llmProvider": llm["provider"],
+        "llmModel": llm["model"],
+        "llmLabel": llm["label"],
+        "imageProvider": image["provider"],
+        "imageModel": image["model"],
+        "imageLabel": image["label"],
+        "status": "queued",
+        "createdAt": _now(),
+        "outputDir": str(templates_root()),
+        "log": "",
+        "progress": _initial_progress(1),
+        "editor": True,
+    }
+    args = [
+        "generate-page",
+        source_id,
+        "--issue",
+        issue,
+        "--report",
+        str(report_path),
+    ]
+    if after_file:
+        args.extend(["--after-file", after_file])
+    if after_page_index is not None:
+        args.extend(["--after-page-index", str(after_page_index)])
+    if title_hint:
+        args.extend(["--title-hint", title_hint])
+    if mock:
+        args.append("--mock")
+
+    extra: dict[str, str] = {}
+    if mock:
+        extra["AGENT_MOCK"] = "1"
+    else:
+        extra.update(llm_env_for_dual(llm))
+        extra.setdefault("LLM_THINKING", "0")
+    job["log"] += (
+        f"[generate-page] template={source_id} "
+        f"afterFile={after_file or '-'} afterPageIndex="
+        f"{after_page_index if after_page_index is not None else '-'}\n"
+    )
+    return _spawn(job, args, extra)
+
+
+def start_delete_page_job(options: dict[str, Any]) -> dict[str, Any]:
+    """Queue a delete-page CLI job (fast; kept async for uniform editor polling)."""
+    from admin.fsutil import template_dir as resolve_pack
+
+    source_id = str(options.get("sourceTemplateId") or options.get("templateId") or "").strip()
+    if not source_id:
+        raise RuntimeError("缺少模板 id")
+
+    source = resolve_pack(source_id)
+    meta_path = source / "template.json"
+    if not meta_path.is_file():
+        raise RuntimeError(f"源模板不存在：{source_id}")
+
+    slide_file = str(options.get("file") or options.get("slideFile") or "").strip()
+    page_index = options.get("pageIndex")
+    if page_index is not None and page_index != "":
+        try:
+            page_index = int(page_index)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("pageIndex 必须是整数") from exc
+    else:
+        page_index = None
+    if not slide_file and page_index is None:
+        raise RuntimeError("缺少 file 或 pageIndex")
+
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"无法读取 template.json：{exc}") from exc
+    slides = meta.get("slides") if isinstance(meta, dict) else None
+    if not isinstance(slides, list) or len(slides) <= 1:
+        raise RuntimeError("至少保留一页，无法删除")
+
+    job_id = uuid.uuid4().hex[:12]
+    report_path = jobs_dir() / f"{job_id}-report.json"
+    job: dict[str, Any] = {
+        "id": job_id,
+        "prompt": f"delete {slide_file or page_index}",
+        "issue": f"delete {slide_file or page_index}",
+        "mock": False,
+        "skipImage": True,
+        "packageFormat": "ppt-master",
+        "pipeline": "delete-page",
+        "sourceTemplateId": source_id,
+        "templateId": source_id,
+        "slideFile": slide_file or None,
+        "pageIndex": page_index,
+        "count": 1,
+        "status": "queued",
+        "createdAt": _now(),
+        "outputDir": str(source),
+        "log": "",
+        "progress": _initial_progress(1),
+        "editor": True,
+    }
+    args = [
+        "delete-page",
+        source_id,
+        "--report",
+        str(report_path),
+    ]
+    if slide_file:
+        args.extend(["--file", slide_file])
+    if page_index is not None:
+        args.extend(["--page-index", str(page_index)])
+    job["log"] += (
+        f"[delete-page] template={source_id} "
+        f"file={slide_file or '-'} pageIndex={page_index if page_index is not None else '-'}\n"
+    )
+    return _spawn(job, args, extra={})
+
+
+def start_editor_assist_job(options: dict[str, Any]) -> dict[str, Any]:
+    """Plan + execute editor assist actions (modify / image regen / add / delete)."""
+    from admin.fsutil import template_dir as resolve_pack
+
+    source_id = str(options.get("sourceTemplateId") or options.get("templateId") or "").strip()
+    if not source_id:
+        raise RuntimeError("缺少模板 id")
+    issue = (options.get("issue") or options.get("prompt") or "").strip()
+    if len(issue) < 4:
+        raise RuntimeError("请填写指令（至少 4 字）")
+    if len(issue) > 2000:
+        raise RuntimeError("问题描述过长（最多 2000 字）")
+
+    source = resolve_pack(source_id)
+    meta_path = source / "template.json"
+    if not meta_path.is_file():
+        raise RuntimeError(f"源模板不存在：{source_id}")
+
+    slide_file = str(options.get("file") or options.get("slideFile") or "").strip()
+    page_index = options.get("pageIndex")
+    if page_index is not None and page_index != "":
+        try:
+            page_index = int(page_index)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("pageIndex 必须是整数") from exc
+    else:
+        page_index = None
+
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"无法读取 template.json：{exc}") from exc
+    slides = meta.get("slides") if isinstance(meta, dict) else None
+    if not isinstance(slides, list) or not slides:
+        raise RuntimeError("模板尚无 HTML 页面")
+
+    mock = bool(options.get("mock"))
+    llm = resolve_llm_selection(options.get("llmProvider"), options.get("llmModel"))
+    if not mock:
+        llm_env_for_dual(llm)
+
+    image_env: dict[str, str] = {}
+    try:
+        img = resolve_image_selection(
+            options.get("imageProvider"), options.get("imageModel")
+        )
+        image_env = image_env_for_selection(img)
+    except Exception:
+        # Image provider optional until regenerate_image runs; regen will warn/placeholder.
+        image_env = {}
+
+    job_id = uuid.uuid4().hex[:12]
+    report_path = jobs_dir() / f"{job_id}-report.json"
+    target_path = None
+    target = options.get("element") or options.get("targetElement")
+    if target:
+        target_path = jobs_dir() / f"{job_id}-target.json"
+        try:
+            from templates.element_target import normalize_element_target
+
+            cleaned = normalize_element_target(target)
+            if cleaned:
+                target_path.write_text(
+                    json.dumps(cleaned, ensure_ascii=False, indent=2) + "\n",
+                    encoding="utf-8",
+                )
+            else:
+                target_path = None
+        except Exception:
+            target_path = None
+
+    job: dict[str, Any] = {
+        "id": job_id,
+        "prompt": issue,
+        "issue": issue,
+        "mock": mock,
+        "skipImage": False,
+        "packageFormat": "ppt-master",
+        "pipeline": "editor-assist",
+        "sourceTemplateId": source_id,
+        "templateId": source_id,
+        "slideFile": slide_file or None,
+        "pageIndex": page_index,
+        "count": 1,
+        "llmProvider": llm["provider"],
+        "llmModel": llm["model"],
+        "llmLabel": llm["label"],
+        "status": "queued",
+        "createdAt": _now(),
+        "outputDir": str(source),
+        "log": "",
+        "progress": _initial_progress(1),
+        "editor": True,
+    }
+    args = [
+        "editor-assist",
+        source_id,
+        "--issue",
+        issue,
+        "--report",
+        str(report_path),
+    ]
+    if slide_file:
+        args.extend(["--file", slide_file])
+    if page_index is not None:
+        args.extend(["--page-index", str(page_index)])
+    if target_path is not None:
+        args.extend(["--target-json", str(target_path)])
+    if mock:
+        args.append("--mock")
+
+    extra: dict[str, str] = {}
+    if mock:
+        extra["AGENT_MOCK"] = "1"
+    else:
+        extra.update(llm_env_for_dual(llm))
+        extra.setdefault("LLM_THINKING", "0")
+        extra.update(image_env)
+        # Allow image regen even if AGENT_SKIP_IMAGE was set in parent shell
+        extra["AGENT_SKIP_IMAGE"] = "0"
+    job["log"] += (
+        f"[editor-assist] template={source_id} "
         f"file={slide_file or '-'} pageIndex={page_index if page_index is not None else '-'}\n"
     )
     return _spawn(job, args, extra)

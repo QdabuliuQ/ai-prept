@@ -10,6 +10,7 @@ export {
   useCanvasZoomStore,
   useThemeStore,
   useChartInspectorStore,
+  useFilePreviewStore,
   useGalleryRemixStore,
   useSlideSelectionStore,
 } from "./zustand";

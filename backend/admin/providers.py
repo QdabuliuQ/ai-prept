@@ -29,7 +29,19 @@ LLM_PROVIDERS: list[dict[str, Any]] = [
         "label": "商汤 SenseNova",
         "tier": "heavy",
         "baseUrl": "https://token.sensenova.cn/v1",
-        "models": [{"id": "SenseChat-5", "label": "SenseChat-5"}],
+        "models": [
+            # deepseek-v4-flash 在商汤网关上明显快于本校 flash-lite（测 ~1–2s vs ~12–20s）
+            {"id": "deepseek-v4-flash", "label": "DeepSeek V4 Flash"},
+            {"id": "deepseek-flash", "label": "DeepSeek V4.1 Flash"},
+            {
+                "id": "sensenova-6.8-flash-lite",
+                "label": "SenseNova 6.8 Flash Lite",
+            },
+            {"id": "sensenova-u1.5-lite", "label": "SenseNova U1.5 Lite"},
+            {"id": "glm-5.2", "label": "GLM-5.2"},
+            {"id": "kimi-k3", "label": "Kimi K3"},
+            # u1.5-fast 当前 chat/completions 返回 model is not found，暂不列出
+        ],
         "keyEnvNames": ["SENSENOVA_API_KEYS", "SENSENOVA_API_KEY"],
     },
     {
@@ -184,6 +196,39 @@ LLM_PROVIDERS: list[dict[str, Any]] = [
             "FREESHARE_API_KEY",
         ],
     },
+    {
+        "id": "workbuddy",
+        "label": "WorkBuddy (本机)",
+        "tier": "heavy",
+        # OpenAI 兼容：workbuddy-bridge → CodeBuddy CLI
+        "baseUrl": "http://127.0.0.1:3000/v1",
+        "models": [
+            {"id": "workbuddy", "label": "workbuddy（默认）"},
+            {"id": "hy4-preview-f", "label": "hy4-preview-f"},
+            {"id": "hy3", "label": "hy3"},
+            {"id": "hy3-x", "label": "hy3-x"},
+            {"id": "space-bunny", "label": "space-bunny"},
+            {"id": "deepseek-v4.1-flash", "label": "deepseek-v4.1-flash"},
+            {"id": "deepseek-v4-pro", "label": "deepseek-v4-pro"},
+            {"id": "glm-5.3", "label": "glm-5.3"},
+            {"id": "glm-5.3-flash", "label": "glm-5.3-flash"},
+            {"id": "glm-5.2", "label": "glm-5.2"},
+            {"id": "glm-5.1", "label": "glm-5.1"},
+            {"id": "glm-5v-turbo", "label": "glm-5v-turbo"},
+            {"id": "minimax-m3", "label": "minimax-m3"},
+            {"id": "minimax-m2.7", "label": "minimax-m2.7"},
+            {"id": "kimi-k3-1", "label": "kimi-k3-1"},
+            {"id": "kimi-k2.8-preview", "label": "kimi-k2.8-preview"},
+            {"id": "kimi-k2.7", "label": "kimi-k2.7"},
+            {"id": "kimi-k2.6", "label": "kimi-k2.6"},
+        ],
+        "keyEnvNames": [
+            "WORKBUDDY_API_KEYS",
+            "WORKBUDDY_API_KEY",
+            "LLM_API_KEYS",
+            "LLM_API_KEY",
+        ],
+    },
 ]
 
 IMAGE_PROVIDERS: list[dict[str, Any]] = [
@@ -227,8 +272,6 @@ IMAGE_PROVIDERS: list[dict[str, Any]] = [
         "keyEnvNames": [
             "SILICONFLOW_API_KEYS",
             "SILICONFLOW_API_KEY",
-            "IMAGE_API_KEYS",
-            "IMAGE_API_KEY",
         ],
         "transport": "siliconflow-images",
     },
@@ -285,6 +328,8 @@ def list_llm_providers_public() -> list[dict[str, Any]]:
             row["baseUrl"] = _env("GROQ_BASE_URL") or row["baseUrl"]
         if p["id"] == "freeshare":
             row["baseUrl"] = _env("FREESHARE_BASE_URL") or row["baseUrl"]
+        if p["id"] == "workbuddy":
+            row["baseUrl"] = _env("WORKBUDDY_BASE_URL") or row["baseUrl"]
         row["configured"] = bool(keys)
         row["keyCount"] = len(keys)
         row["keyHint"] = _mask(keys[0]) if keys else None
@@ -336,6 +381,8 @@ def resolve_llm_selection(
         base = _env("GROQ_BASE_URL") or base
     if pid == "freeshare":
         base = _env("FREESHARE_BASE_URL") or base
+    if pid == "workbuddy":
+        base = _env("WORKBUDDY_BASE_URL") or base
     return {
         "provider": found["id"],
         "model": mid,
@@ -400,6 +447,12 @@ def llm_env_for_dual(selection: dict[str, Any]) -> dict[str, str]:
     if selection["provider"] == "freeshare":
         env["FREESHARE_API_KEY"] = keys[0]
         env["FREESHARE_API_KEYS"] = ",".join(keys)
+    if selection["provider"] == "workbuddy":
+        env["WORKBUDDY_API_KEY"] = keys[0]
+        env["WORKBUDDY_API_KEYS"] = ",".join(keys)
+        # CodeBuddy / 本机桥偏慢，尤其改页+生图
+        env.setdefault("LLM_TIMEOUT", "360")
+        env.setdefault("LLM_ATTEMPTS", "2")
     return env
 
 
@@ -491,4 +544,10 @@ def image_env_for_selection(selection: dict[str, Any]) -> dict[str, str]:
         env["IMAGE_API_KEYS"] = ",".join(keys)
     if selection.get("baseUrl"):
         env["IMAGE_API_BASE_URL"] = selection["baseUrl"]
+    if provider == "siliconflow" and keys:
+        env["SILICONFLOW_API_KEY"] = keys[0]
+        env["SILICONFLOW_API_KEYS"] = ",".join(keys)
+    if provider == "pollinations" and keys:
+        env["POLLINATIONS_API_KEY"] = keys[0]
+        env["POLLINATIONS_API_KEYS"] = ",".join(keys)
     return env

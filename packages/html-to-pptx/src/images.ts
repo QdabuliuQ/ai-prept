@@ -1,5 +1,5 @@
 import { inchToPx } from "./config";
-import { rasterizeClippedImage } from "./lib/clip";
+import { rasterizeClippedImage, rasterizeRoundedImage } from "./lib/clip";
 import { rasterizeSvgMarkup } from "./lib/svg";
 import type { ImageNode, ImageSizing, SlideNode } from "./types";
 
@@ -197,6 +197,35 @@ export async function materializeImages(nodes: SlideNode[]): Promise<SlideNode[]
         sizing: "stretch",
         rotate: undefined,
         clipPolygon: undefined,
+        clipDraw: undefined,
+        clipHostPx: undefined,
+        intrinsicSize: { width: wPx, height: hPx },
+      });
+      continue;
+    }
+
+    if (img.roundClipCss && img.clipDraw && img.clipHostPx) {
+      const dataUrl = await rasterizeRoundedImage(
+        img.src,
+        img.w,
+        img.h,
+        img.roundClipCss,
+        img.clipDraw,
+        img.clipHostPx.w,
+        img.clipHostPx.h,
+        sizing,
+        img.objectPosition,
+      );
+      if (!dataUrl) continue;
+      const wPx = Math.max(1, Math.round(inchToPx(img.w)));
+      const hPx = Math.max(1, Math.round(inchToPx(img.h)));
+      out.push({
+        ...img,
+        dataUrl,
+        src: dataUrl,
+        sizing: "stretch",
+        rotate: undefined,
+        roundClipCss: undefined,
         clipDraw: undefined,
         clipHostPx: undefined,
         intrinsicSize: { width: wPx, height: hPx },

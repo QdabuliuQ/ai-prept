@@ -217,6 +217,22 @@ function humanizeRemixError(raw: string, cancelled = false): string {
     return "API 额度已用尽，请检查套餐与计费后重试";
   }
   if (
+    lower === "forbidden" ||
+    lower.includes("'message': 'forbidden'") ||
+    lower.includes('"message":"forbidden"') ||
+    /\berror code:\s*403\b/.test(lower) ||
+    /\b403\b/.test(text)
+  ) {
+    return "当前所选模型拒绝访问（403 Forbidden），请更换文案模型或检查对应 API Key 权限后重试";
+  }
+  if (
+    lower.includes("connection error") ||
+    lower.includes("connecterror") ||
+    lower.includes("connection refused")
+  ) {
+    return "无法连接模型服务，请检查网络与模型配置后重试";
+  }
+  if (
     lower.includes("high demand") ||
     lower.includes("unavailable") ||
     /\b503\b/.test(text)

@@ -2,6 +2,7 @@ import type { ThemeToken } from "@/theme/types";
 import { MAX_PAGES } from "@/constants/limits";
 import i18n from "@/i18n";
 import { applyDocumentTheme, DEFAULT_PPT_THEME, toThemeToken } from "@/theme";
+import type { TemplateTreeNode } from "@/utils/templateTree";
 import { getRandomId } from "@/utils";
 import { toast } from "sonner";
 import { create } from "zustand";
@@ -13,6 +14,8 @@ export type Page = {
    * 缺省时由 `buildBlankSlideHtml` 生成空白页。
    */
   html?: string;
+  /** 来自模板包的相对路径，如 slides/cover.html */
+  sourceFile?: string;
   visible: boolean;
   toggleInAnimation: string;
   toggleInDuration: string;
@@ -54,6 +57,10 @@ function createBlankPage(): Page {
 
 interface PPTState {
   name: string;
+  /** 当前文档来源的模板 id（agent-output/<id>）；非模板文档为 null */
+  templateId: string | null;
+  /** 打开模板时附带的文件树（可被 /tree 刷新） */
+  templateTree: TemplateTreeNode[];
   theme: ThemeToken;
   gridSize: number;
   gridType: "grid" | "line" | "none";
@@ -88,6 +95,10 @@ interface PPTState {
   setName: (value: string) => void;
   getName: () => string;
 
+  setTemplateId: (templateId: string | null) => void;
+  getTemplateId: () => string | null;
+  setTemplateTree: (tree: TemplateTreeNode[]) => void;
+
   setTheme: (theme: ThemeToken) => void;
   getTheme: () => ThemeToken;
   /** 切换主题色并重映射当前文档配色 */
@@ -115,6 +126,8 @@ interface PPTState {
 
 export const usePPTStore = create<PPTState>((set, get) => ({
   name: "",
+  templateId: null,
+  templateTree: [],
   theme: toThemeToken(DEFAULT_PPT_THEME),
   gridSize: 20,
   gridType: "grid",
@@ -148,6 +161,10 @@ export const usePPTStore = create<PPTState>((set, get) => ({
 
   setName: (value) => set({ name: value }),
   getName: () => get().name,
+
+  setTemplateId: (templateId) => set({ templateId }),
+  getTemplateId: () => get().templateId,
+  setTemplateTree: (tree) => set({ templateTree: Array.isArray(tree) ? tree : [] }),
 
   setTheme: (theme) => set({ theme }),
   getTheme: () => get().theme,

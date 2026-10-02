@@ -37,23 +37,74 @@ def qiniu_public_url(cfg: dict[str, str], key: str) -> str:
     return f"{cfg['domain']}/{key.lstrip('/')}"
 
 
+def _normalize_qiniu_key(key: str) -> str:
+    """Strip leading slash, query string, and fragment from an object key."""
+    raw = str(key or "").strip().lstrip("/")
+    if not raw:
+        return ""
+    # Preview URLs often append ?v=<cache_bust>; that must not be part of the key.
+    for sep in ("?", "#"):
+        if sep in raw:
+            raw = raw.split(sep, 1)[0]
+    return raw.lstrip("/")
+
+
 def _key_from_url(cfg: dict[str, str], url: str) -> str | None:
     if not isinstance(url, str) or not url.startswith("http"):
         return None
     domain = cfg["domain"].rstrip("/")
     if url.startswith(domain + "/"):
-        return url[len(domain) + 1 :].lstrip("/")
+        return _normalize_qiniu_key(url[len(domain) + 1 :])
     # 兼容自定义 CDN 域名与配置不完全一致时，用 path 末两段：{prefix}{id}/xx.webp 或 {prefix}{id}.zip
     try:
-        from urllib.parse import urlparse
+        from urllib.parse import urlparse, unquote
 
-        path = urlparse(url).path.lstrip("/")
+        parsed = urlparse(url)
+        path = unquote(parsed.path).lstrip("/")
         prefix = cfg["keyPrefix"].lstrip("/")
         if path.startswith(prefix):
-            return path
+            return _normalize_qiniu_key(path)
     except Exception:
         pass
     return None
+
+
+def _parse_batch_items(ret: Any, info: Any) -> list[Any]:
+    """qiniu SDK may leave ret=None on HTTP 298; fall back to text_body JSON."""
+    if isinstance(ret, list):
+        return ret
+    body = getattr(info, "text_body", None) or ""
+    if not body:
+        return []
+    try:
+        import json
+
+        parsed = json.loads(body)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
+def _batch_item_error(item: Any) -> str:
+    if item is None:
+        return "empty batch item"
+    if isinstance(item, dict):
+        code = item.get("code")
+        data = item.get("data") if isinstance(item.get("data"), dict) else {}
+        err = data.get("error") or item.get("error") or item.get("message")
+        if err:
+            return f"code={code}: {err}"
+        return f"code={code}: {item}"
+    return str(item)
+
+
+def _is_missing_ok(code: Any, payload: Any = None) -> bool:
+    """612 / no such file → treat delete as success."""
+    if code in (200, 612):
+        return True
+    if isinstance(payload, dict) and payload.get("error") == "no such file or directory":
+        return True
+    return False
 
 
 def delete_keys_from_qiniu(
@@ -66,7 +117,13 @@ def delete_keys_from_qiniu(
         raise RuntimeError(
             "未配置七牛云。请在 .env.local 设置 QINIU_ACCESS_KEY / QINIU_SECRET_KEY / QINIU_BUCKET / QINIU_DOMAIN"
         )
-    cleaned = sorted({k.lstrip("/") for k in keys if isinstance(k, str) and k.strip()})
+    cleaned = sorted(
+        {
+            k
+            for k in (_normalize_qiniu_key(x) for x in keys if isinstance(x, str))
+            if k
+        }
+    )
     if not cleaned:
         return {"deleted": [], "failed": []}
 
@@ -87,10 +144,7 @@ def delete_keys_from_qiniu(
             # 整批失败：逐个重试，便于定位
             for key in chunk:
                 r, inf = bucket.delete(cfg["bucket"], key)
-                # 612 = no such file or directory
-                if inf.status_code in (200, 612) or (
-                    isinstance(r, dict) and r.get("error") == "no such file or directory"
-                ):
+                if _is_missing_ok(inf.status_code, r):
                     deleted.append(key)
                 else:
                     failed.append(
@@ -100,18 +154,18 @@ def delete_keys_from_qiniu(
                         }
                     )
             continue
-        items = ret if isinstance(ret, list) else []
+        items = _parse_batch_items(ret, info)
         for idx, key in enumerate(chunk):
             item = items[idx] if idx < len(items) else None
             code = item.get("code") if isinstance(item, dict) else None
-            # 200 ok, 612 missing
-            if code in (200, 612):
+            data = item.get("data") if isinstance(item, dict) else None
+            if _is_missing_ok(code, data if isinstance(data, dict) else item):
                 deleted.append(key)
             else:
                 failed.append(
                     {
                         "key": key,
-                        "error": str(item if item is not None else "unknown"),
+                        "error": _batch_item_error(item),
                     }
                 )
     return {"deleted": deleted, "failed": failed}
@@ -179,9 +233,10 @@ def collect_qiniu_keys_for_template(meta: dict[str, Any]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
     for key in keys:
-        if key not in seen:
-            seen.add(key)
-            out.append(key)
+        norm = _normalize_qiniu_key(key)
+        if norm and norm not in seen:
+            seen.add(norm)
+            out.append(norm)
     return out
 
 

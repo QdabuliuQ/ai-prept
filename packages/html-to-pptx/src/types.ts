@@ -117,6 +117,11 @@ export type ImageNode = NodeBase & {
   clipDraw?: { drawX: number; drawY: number; drawW: number; drawH: number };
   /** Clip host layout size (CSS px) for scaling draw rect. */
   clipHostPx?: { w: number; h: number };
+  /**
+   * CSS border-radius on the img or an overflow:hidden ancestor.
+   * Baked to a transparent-corner PNG in materializeImages.
+   */
+  roundClipCss?: string;
 };
 
 export type BorderLineNode = NodeBase & {

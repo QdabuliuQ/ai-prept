@@ -5,6 +5,39 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 
 
+_VOID = frozenset(
+    {
+        "area",
+        "base",
+        "br",
+        "col",
+        "embed",
+        "hr",
+        "img",
+        "input",
+        "link",
+        "meta",
+        "param",
+        "source",
+        "track",
+        "wbr",
+    }
+)
+_SKIP_BARE_WRAP_TAGS = frozenset(
+    {
+        "script",
+        "style",
+        "svg",
+        "textarea",
+        "code",
+        "pre",
+        "title",
+        "head",
+        "option",
+    }
+)
+_INLINE_SKIP_SIBLINGS = frozenset({"br", "wbr"})
+
 _STYLE_ATTR_RE = re.compile(
     r"\bstyle\s*=\s*(?P<quote>['\"])(?P<style>.*?)(?P=quote)",
     re.I | re.S,
@@ -34,6 +67,152 @@ class HtmlNormalizationResult:
     html: str
     rotated_text_fixes: int = 0
     bounds_fixes: int = 0
+    bare_text_fixes: int = 0
+
+
+@dataclass
+class _BareNode:
+    kind: str  # tag | text | comment | decl
+    tag: str = ""
+    attrs: dict[str, str] | None = None
+    children: list[_BareNode] | None = None
+    text: str = ""
+    void: bool = False
+
+    def __post_init__(self) -> None:
+        if self.attrs is None:
+            self.attrs = {}
+        if self.children is None:
+            self.children = []
+
+
+class _BareTextTreeBuilder(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.root = _BareNode("tag", "root")
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        t = tag.lower()
+        node = _BareNode(
+            "tag",
+            t,
+            {k.lower(): (v or "") for k, v in attrs if k},
+            void=t in _VOID,
+        )
+        self.stack[-1].children.append(node)
+        if not node.void:
+            self.stack.append(node)
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        t = tag.lower()
+        node = _BareNode(
+            "tag",
+            t,
+            {k.lower(): (v or "") for k, v in attrs if k},
+            void=True,
+        )
+        self.stack[-1].children.append(node)
+
+    def handle_endtag(self, tag: str) -> None:
+        t = tag.lower()
+        for i in range(len(self.stack) - 1, 0, -1):
+            if self.stack[i].tag == t:
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data: str) -> None:
+        if data:
+            self.stack[-1].children.append(_BareNode("text", text=data))
+
+    def handle_entityref(self, name: str) -> None:
+        self.stack[-1].children.append(_BareNode("text", text=f"&{name};"))
+
+    def handle_charref(self, name: str) -> None:
+        self.stack[-1].children.append(_BareNode("text", text=f"&#{name};"))
+
+    def handle_comment(self, data: str) -> None:
+        self.stack[-1].children.append(_BareNode("comment", text=data))
+
+    def handle_decl(self, decl: str) -> None:
+        self.stack[-1].children.append(_BareNode("decl", text=decl))
+
+
+def _fmt_bare_attrs(attrs: dict[str, str]) -> str:
+    parts: list[str] = []
+    for k, v in attrs.items():
+        if v == "":
+            parts.append(k)
+        else:
+            esc = v.replace("&", "&amp;").replace('"', "&quot;")
+            parts.append(f'{k}="{esc}"')
+    return (" " + " ".join(parts)) if parts else ""
+
+
+def _serialize_bare(node: _BareNode) -> str:
+    if node.kind == "text":
+        return node.text
+    if node.kind == "comment":
+        return f"<!--{node.text}-->"
+    if node.kind == "decl":
+        return f"<!{node.text}>"
+    if node.tag == "root":
+        return "".join(_serialize_bare(ch) for ch in (node.children or []))
+    attrs = _fmt_bare_attrs(node.attrs or {})
+    if node.void:
+        return f"<{node.tag}{attrs}>"
+    inner = "".join(_serialize_bare(ch) for ch in (node.children or []))
+    return f"<{node.tag}{attrs}>{inner}</{node.tag}>"
+
+
+def _wrap_bare_text_in_tree(node: _BareNode) -> int:
+    """Wrap non-empty direct text siblings of elements in <span data-element=text>."""
+    if node.kind != "tag":
+        return 0
+    if node.tag in _SKIP_BARE_WRAP_TAGS:
+        return 0
+    # text leaves must stay flat (plain text / <br> only)
+    if (node.attrs or {}).get("data-element", "").lower() == "text":
+        return 0
+
+    fixes = 0
+    kids = node.children or []
+    has_element_sibling = any(
+        ch.kind == "tag" and ch.tag not in _INLINE_SKIP_SIBLINGS for ch in kids
+    )
+    if has_element_sibling:
+        new_kids: list[_BareNode] = []
+        for ch in kids:
+            if ch.kind == "text" and ch.text.strip():
+                wrapped = _BareNode("tag", "span", {"data-element": "text"})
+                wrapped.children = [ch]
+                new_kids.append(wrapped)
+                fixes += 1
+            else:
+                new_kids.append(ch)
+        node.children = new_kids
+        kids = new_kids
+
+    for ch in kids:
+        if ch.kind == "tag":
+            fixes += _wrap_bare_text_in_tree(ch)
+    return fixes
+
+
+def wrap_bare_text_runs(html: str) -> HtmlNormalizationResult:
+    """Wrap bare text that sits beside element siblings (mixed titles, etc.)."""
+    if not html or not html.strip():
+        return HtmlNormalizationResult(html=html or "")
+    builder = _BareTextTreeBuilder()
+    try:
+        builder.feed(html)
+        builder.close()
+    except Exception:
+        return HtmlNormalizationResult(html=html)
+    fixes = _wrap_bare_text_in_tree(builder.root)
+    if not fixes:
+        return HtmlNormalizationResult(html=html)
+    return HtmlNormalizationResult(html=_serialize_bare(builder.root), bare_text_fixes=fixes)
 
 
 @dataclass
@@ -267,10 +446,12 @@ def normalize_slide_html(html: str) -> HtmlNormalizationResult:
     """Run all HTML normalizers for export-safe slides."""
     a = normalize_rotated_text_wrappers(html)
     b = normalize_out_of_bounds_rotated_labels(a.html)
+    c = wrap_bare_text_runs(b.html)
     return HtmlNormalizationResult(
-        html=b.html,
+        html=c.html,
         rotated_text_fixes=a.rotated_text_fixes,
         bounds_fixes=b.bounds_fixes,
+        bare_text_fixes=c.bare_text_fixes,
     )
 
 

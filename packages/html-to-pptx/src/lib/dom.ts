@@ -433,6 +433,58 @@ export function imageDrawInClipHost(
   };
 }
 
+function hasMeaningfulBorderRadius(borderRadius: string): boolean {
+  const br = (borderRadius || "").trim().toLowerCase();
+  if (!br || br === "0" || br === "0px" || br === "none") return false;
+  // "0px 0px 0px 0px" / all zeros
+  const parts = br.split(/[\s/]+/).filter(Boolean);
+  return parts.some((p) => {
+    if (p.endsWith("%")) return Number.parseFloat(p) > 0;
+    return parsePx(p) > 0;
+  });
+}
+
+function isOverflowClipping(styles: CSSStyleDeclaration): boolean {
+  const o = (styles.overflow || "").toLowerCase();
+  const ox = (styles.overflowX || "").toLowerCase();
+  const oy = (styles.overflowY || "").toLowerCase();
+  return (
+    o === "hidden" ||
+    o === "clip" ||
+    ox === "hidden" ||
+    ox === "clip" ||
+    oy === "hidden" ||
+    oy === "clip"
+  );
+}
+
+/**
+ * Img itself with border-radius, or nearest overflow:hidden ancestor with
+ * border-radius (common hero crop: parent radius + overflow, child object-fit).
+ */
+export function findRoundedImageHost(
+  el: HTMLElement,
+  slideRoot: HTMLElement,
+): { host: HTMLElement; radiusCss: string } | null {
+  const selfStyles = computedStyle(el);
+  if (hasMeaningfulBorderRadius(selfStyles.borderRadius)) {
+    return { host: el, radiusCss: selfStyles.borderRadius };
+  }
+
+  let cur: HTMLElement | null = el.parentElement;
+  while (cur && cur !== slideRoot) {
+    const styles = computedStyle(cur);
+    if (
+      isOverflowClipping(styles) &&
+      hasMeaningfulBorderRadius(styles.borderRadius)
+    ) {
+      return { host: cur, radiusCss: styles.borderRadius };
+    }
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
 export function waitFrames(n = 1): Promise<void> {
   return new Promise((resolve) => {
     const step = (left: number) => {

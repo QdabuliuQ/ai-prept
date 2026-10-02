@@ -64,6 +64,9 @@ def select_options(*, include_variants: bool = True) -> list[dict[str, Any]]:
 
 
 def pick_random(*, exclude: list[str] | None = None) -> dict[str, Any] | None:
+    """Uniform-within-bucket pick; warm-paper styles capped (~25%) so beige doesn't dominate."""
+    from ppt_master.styles import is_paper_warm_style
+
     catalog = load_catalog()
     ban = set(exclude or [])
     curated = [
@@ -75,7 +78,15 @@ def pick_random(*, exclude: list[str] | None = None) -> dict[str, Any] | None:
         curated = [s for s in catalog["styles"] if s.get("id") not in ban]
     if not curated:
         return None
-    s = random.choice(curated)
+
+    warm = [s for s in curated if is_paper_warm_style(str(s.get("id") or ""))]
+    warm_ids = {str(s.get("id") or "") for s in warm}
+    other = [s for s in curated if str(s.get("id") or "") not in warm_ids]
+    if warm and other:
+        pool = warm if random.random() < 0.25 else other
+    else:
+        pool = curated
+    s = random.choice(pool)
     return {
         "mode": "catalog",
         "styleId": s["id"],

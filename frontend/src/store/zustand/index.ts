@@ -27,6 +27,8 @@ export { useCanvasZoomStore } from "./canvasZoomStore";
 
 export { useChartInspectorStore } from "./chartInspectorStore";
 
+export { useFilePreviewStore } from "./filePreviewStore";
+
 export { useThemeStore, type ThemeMode } from "./themeStore";
 
 export { useGalleryRemixStore } from "./galleryRemixStore";
@@ -155,6 +157,14 @@ class PPTStoreCompat {
 
   getName = () => {
     return usePPTStore.getState().getName();
+  };
+
+  setTemplateId = (templateId: string | null) => {
+    usePPTStore.getState().setTemplateId(templateId);
+  };
+
+  getTemplateId = () => {
+    return usePPTStore.getState().getTemplateId();
   };
 
   setTheme = (theme: import("@/theme/types").ThemeToken) => {

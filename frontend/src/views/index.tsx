@@ -2,6 +2,7 @@ import { GlobalContextMenu } from "@/components/GlobalContextMenu";
 import { SideInspector } from "@/components/SideInspector";
 import { useDisplayStatusStore, useFullscreenStore } from "@/store";
 import { useEffect, useRef, type CSSProperties } from "react";
+import { AiChatPanel } from "./AiChat";
 import { Canvas } from "./Canvas";
 import { Footer } from "./Footer";
 import { Grid } from "./Grid";
@@ -10,7 +11,7 @@ import { Menu } from "./Menu";
 import { Preview } from "./Preview";
 import { Slideshow } from "./Slideshow";
 
-const DEFAULT_PREVIEW_WIDTH = 280;
+const DEFAULT_PREVIEW_WIDTH = 300;
 
 const meshBaseStyle: CSSProperties = {
   background: "var(--app-mesh-base)",
@@ -22,9 +23,6 @@ const blobBaseClass =
 const glassVeilStyle: CSSProperties = {
   background: "var(--app-glass-veil)",
 };
-
-const glassPanelClass =
-  "box-border overflow-hidden border border-chrome-border bg-chrome-panel shadow-[var(--panel-shadow)] backdrop-blur-[22px] backdrop-saturate-[1.25]";
 
 const canvasPaneClass =
   "flex flex-col flex-1 min-h-0 overflow-hidden rounded-xl border border-[var(--canvas-pane-border)] bg-[var(--canvas-pane-bg)] shadow-[var(--canvas-pane-shadow)] backdrop-blur-[12px] backdrop-saturate-[1.1] p-0";
@@ -130,7 +128,7 @@ export default function Index() {
             >
               <div
                 ref={previewPanelRef}
-                className={`${glassPanelClass} flex-none w-[280px] min-w-[240px] max-w-[340px] h-full min-h-0 rounded-[14px]`}
+                className="box-border flex h-full min-h-0 w-[300px] min-w-[260px] max-w-[360px] flex-none flex-col"
               >
                 <Preview />
               </div>
@@ -143,6 +141,7 @@ export default function Index() {
                   <SideInspector />
                 </div>
               </div>
+              <AiChatPanel />
             </div>
           )}
           {displayStatus === "grid" && (

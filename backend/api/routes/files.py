@@ -14,8 +14,10 @@ from admin.fsutil import (
     SAFE_TEMPLATE_DIR,
     effective_status,
     list_template_ids,
+    list_template_tree,
     read_meta,
     resolve_under,
+    template_dir,
     templates_root,
 )
 from admin.store import load_editor_doc
@@ -137,6 +139,7 @@ def get_html_template(template_id: str):
         "templateId": template_id,
         "label": doc.get("label"),
         "description": doc.get("description"),
+        "tree": doc.get("tree") or [],
         "pages": [
             {
                 "id": p["id"],
@@ -158,6 +161,23 @@ def get_html_template(template_id: str):
             for p in doc["pages"]
         ],
     }
+
+
+@router.get("/api/html-templates/{template_id}/tree")
+def get_html_template_tree(template_id: str):
+    """List current template package file tree for the editor sidebar."""
+    if not SAFE_TEMPLATE_DIR.match(template_id):
+        return JSONResponse({"error": "INVALID_ID"}, status_code=400)
+    tree = list_template_tree(template_id)
+    if tree is None:
+        return JSONResponse(
+            {
+                "error": "NOT_FOUND",
+                "message": "模板包不存在或缺少 template.json（请确认 agent-output/<id>）",
+            },
+            status_code=404,
+        )
+    return {"templateId": template_id, "tree": tree}
 
 
 @router.get("/api/html-templates/{template_id}/assets/{asset_path:path}")

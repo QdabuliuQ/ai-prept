@@ -9,6 +9,7 @@ import {
   usePageActiveStore,
   usePPTStore,
 } from "@/store";
+import { useFilePreviewStore } from "@/store/zustand/filePreviewStore";
 import type { Page } from "@/store/ppt";
 import { initPPTStore } from "@/utils/initStore";
 import {
@@ -36,6 +37,8 @@ import {
 import { useKeyPress, useMemoizedFn, useMount } from "ahooks";
 import { OverlayScrollbarsComponent } from "overlayscrollbars-react";
 import { SlideThumbSkeleton } from "@/components/SlideThumbSkeleton";
+import { TemplateFileTree } from "./TemplateFileTree";
+import { FolderTree, Images } from "lucide-react";
 import {
   memo,
   useEffect,
@@ -48,12 +51,21 @@ import styles from "./index.module.less";
 
 /**
  * 侧栏默认宽约 230，扣除页码与间距后缩略图宽约 180。
- * 高度按画布 10:7 推算，再加底部 gap。
+ * 高度按画布 16:9 推算，再加底部 gap。
+ * 注意：虚拟列表不要用 measureElement —— 切到「文件」页签时容器
+ * display:none，ResizeObserver 会把高度量成 0，切回后缩略图就会叠在一起。
  */
 const PREVIEW_THUMB_WIDTH_EST = 180;
 const ITEM_GAP = 14;
+/** pageItem 左右 padding + 页码列 + gap */
+const ITEM_CHROME_X = 8 + 12 + 20 + 8;
 const ESTIMATED_ITEM_SIZE =
   Math.round(PREVIEW_THUMB_WIDTH_EST / CANVAS_ASPECT_RATIO) + ITEM_GAP;
+
+function thumbItemSizeForWidth(containerWidth: number): number {
+  const thumbWidth = Math.max(containerWidth - ITEM_CHROME_X, 120);
+  return Math.round(thumbWidth / CANVAS_ASPECT_RATIO) + ITEM_GAP;
+}
 
 const PageItem: FC<{
   page: Page;
@@ -84,12 +96,10 @@ const PageItem: FC<{
 
     return (
       <div
-        className={`${styles.pageItem} relative cursor-pointer flex gap-[8px]`}
+        className={`${styles.pageItem} relative flex cursor-pointer gap-[8px]`}
       >
         <span
-          className={`${styles.pageIndex} text-[12px] mt-[4px] font-medium ${
-            isActive ? "text-primary" : "text-chrome-muted"
-          }`}
+          className={`${styles.pageIndex} ${isActive ? styles.pageIndexActive : ""}`}
         >
           {index + 1}
         </span>
@@ -99,14 +109,14 @@ const PageItem: FC<{
           onContextMenu={(e) => onContextMenu(e, page.id)}
         >
           <div
-            className="previewCanvas relative w-full rounded-[8px] overflow-hidden pointer-events-none bg-chrome-guide"
+            className={styles.thumbCanvas}
             style={{ aspectRatio: CANVAS_ASPECT_RATIO_CSS }}
           >
             {thumbnailUrl ? (
               <img
                 src={thumbnailUrl}
                 alt={`slide-${index + 1}`}
-                className="absolute inset-0 w-full h-full object-fill"
+                className="absolute inset-0 h-full w-full object-fill"
                 draggable={false}
               />
             ) : (
@@ -114,33 +124,37 @@ const PageItem: FC<{
             )}
             {page.visible === false && (
               <div
-                className="absolute top-0 left-0 w-full h-full flex items-center justify-center bg-black/10 rounded-[8px] z-10 pointer-events-auto"
+                className="pointer-events-auto absolute left-0 top-0 z-10 flex h-full w-full items-center justify-center rounded-[10px] bg-black/15"
                 onClick={() => onPageClick(page.id)}
                 onContextMenu={(e) => onContextMenu(e, page.id)}
               >
-                <PreviewCloseOne theme="outline" size="24" fill="var(--icon-color)" />
+                <PreviewCloseOne
+                  theme="outline"
+                  size="22"
+                  fill="var(--icon-color)"
+                />
               </div>
             )}
           </div>
         </div>
-        <div className="floatButton absolute bottom-[-10px] right-[16px] z-10 w-[78%] flex items-center justify-between opacity-0 transition-opacity">
+        <div className="floatButton absolute bottom-[-10px] right-[24px] z-10 flex w-[78%] items-center justify-between opacity-0 transition-opacity duration-150">
           <div>
             {page.visible && (
               <div
                 className={`${styles.floatAction} bg-chrome-panel-solid`}
                 onClick={(e) => onPlayPage(page.id, e)}
               >
-                <PlayOne theme="filled" size="16" fill="#f25f00" />
+                <PlayOne theme="filled" size="15" fill="#f25f00" />
               </div>
             )}
           </div>
-          <div className="flex items-center gap-[8px]">
+          <div className="flex items-center gap-[7px]">
             {index > 0 && (
               <div
                 className={`${styles.floatAction} bg-primary`}
                 onClick={(e) => onMovePageUp(page.id, e)}
               >
-                <Up theme="outline" size="16" fill="#fff" />
+                <Up theme="outline" size="15" fill="#fff" />
               </div>
             )}
             {index < totalPages - 1 && (
@@ -148,14 +162,14 @@ const PageItem: FC<{
                 className={`${styles.floatAction} bg-primary`}
                 onClick={(e) => onMovePageDown(page.id, e)}
               >
-                <Down theme="outline" size="16" fill="#fff" />
+                <Down theme="outline" size="15" fill="#fff" />
               </div>
             )}
             <div
               className={`${styles.floatAction} bg-primary`}
               onClick={(e) => onAddPageAfter(page.id, e)}
             >
-              <Plus theme="outline" size="16" fill="#fff" />
+              <Plus theme="outline" size="15" fill="#fff" />
             </div>
           </div>
         </div>
@@ -185,18 +199,22 @@ const PreviewComponent: FC = () => {
   });
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const thumbsPaneRef = useRef<HTMLDivElement>(null);
   const addButtonRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<any>(null);
   const [scrollHeight, setScrollHeight] = useState(0);
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
+  const [sideTab, setSideTab] = useState<"preview" | "files">("preview");
+  const [itemSize, setItemSize] = useState(ESTIMATED_ITEM_SIZE);
 
   const virtualizer = useVirtualizer({
     count: pages.length,
     getScrollElement: () => scrollElement,
-    estimateSize: () => ESTIMATED_ITEM_SIZE,
+    estimateSize: () => itemSize,
     overscan: 4,
     getItemKey: (index) => pages[index]?.id ?? index,
   });
+  const measureThumbList = useMemoizedFn(() => virtualizer.measure());
 
   const virtualItems = virtualizer.getVirtualItems();
   const visibleRangeKey = virtualItems
@@ -205,11 +223,14 @@ const PreviewComponent: FC = () => {
 
   // OverlayScrollbars 就绪后绑定虚拟列表滚动容器
   useLayoutEffect(() => {
+    if (sideTab !== "preview") return;
+
     const bindViewport = () => {
       const osInstance = scrollContainerRef.current?.osInstance?.();
       if (!osInstance) return false;
       const { viewport } = osInstance.elements();
       setScrollElement(viewport);
+      requestAnimationFrame(() => measureThumbList());
       return true;
     };
 
@@ -222,7 +243,7 @@ const PreviewComponent: FC = () => {
     }, 50);
 
     return () => window.clearInterval(timer);
-  }, [scrollHeight]);
+  }, [scrollHeight, sideTab, measureThumbList]);
 
   // 可视区优先生成缩略图
   useEffect(() => {
@@ -258,6 +279,7 @@ const PreviewComponent: FC = () => {
   );
 
   const handlePageClick = useMemoizedFn((pageId: string) => {
+    useFilePreviewStore.getState().close();
     setPageActive(pageId);
     setActiveMenu("start");
     hideMenu();
@@ -373,29 +395,45 @@ const PreviewComponent: FC = () => {
   });
 
   useEffect(() => {
+    if (sideTab !== "preview") return;
+
     const calculateHeight = () => {
-      if (!containerRef.current || !addButtonRef.current) return;
+      if (!thumbsPaneRef.current || !addButtonRef.current) return;
 
-      const containerHeight = containerRef.current.offsetHeight;
+      const pane = thumbsPaneRef.current;
+      // display:none 时宽高为 0，勿写入，否则会污染虚拟列表间距
+      if (pane.clientWidth <= 0 || pane.clientHeight <= 0) return;
+
       const buttonHeight = addButtonRef.current.offsetHeight;
-      const availableHeight = containerHeight - buttonHeight;
-
+      const availableHeight = Math.max(pane.clientHeight - buttonHeight, 80);
       setScrollHeight(availableHeight);
+      setItemSize(thumbItemSizeForWidth(pane.clientWidth));
     };
 
-    calculateHeight();
+    // 等 tab 内容挂载后再量
+    const raf = requestAnimationFrame(calculateHeight);
     window.addEventListener("resize", calculateHeight);
 
     const resizeObserver = new ResizeObserver(calculateHeight);
+    if (thumbsPaneRef.current) {
+      resizeObserver.observe(thumbsPaneRef.current);
+    }
     if (containerRef.current) {
       resizeObserver.observe(containerRef.current);
     }
 
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener("resize", calculateHeight);
       resizeObserver.disconnect();
     };
-  }, []);
+  }, [sideTab]);
+
+  // 宽度变化后强制按新 itemSize 重算偏移，避免叠层
+  useEffect(() => {
+    if (sideTab !== "preview") return;
+    measureThumbList();
+  }, [itemSize, pages.length, sideTab, measureThumbList]);
 
   // 预热：若缓存为空，立刻为前几页生成，减少首次白屏
   useEffect(() => {
@@ -411,94 +449,143 @@ const PreviewComponent: FC = () => {
   return (
     <div
       ref={containerRef}
-      className={`${styles.sidebar} w-full h-full box-border flex flex-col pb-[12px] pt-[12px]`}
-      style={{ minWidth: 0, overflow: "hidden" }}
+      className={`${styles.shell} box-border flex h-full w-full flex-col`}
+      style={{ minWidth: 0 }}
     >
-      <OverlayScrollbarsComponent
-        ref={scrollContainerRef}
-        className="flex-1"
-        style={{
-          height: scrollHeight > 0 ? `${scrollHeight}px` : "100%",
-          maxHeight: scrollHeight > 0 ? `${scrollHeight}px` : "100%",
-          padding: "10px 0",
-          boxSizing: "border-box",
-        }}
-        options={{
-          scrollbars: {
-            theme: "os-theme-light",
-            autoHide: "leave",
-            autoHideDelay: 300,
-          },
-          overflow: {
-            x: "hidden",
-            y: "scroll",
-          },
-        }}
+      <div
+        className={styles.sideTabs}
+        role="tablist"
+        aria-label="左侧栏视图"
       >
-        {pages.length > 0 ? (
+        <button
+          type="button"
+          role="tab"
+          aria-selected={sideTab === "preview"}
+          className={`${styles.sideTab} ${sideTab === "preview" ? styles.sideTabActive : ""}`}
+          onClick={() => setSideTab("preview")}
+        >
+          <span className={styles.sideTabIcon} aria-hidden>
+            <Images />
+          </span>
+          <span className={styles.sideTabLabel}>预览</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={sideTab === "files"}
+          className={`${styles.sideTab} ${sideTab === "files" ? styles.sideTabActive : ""}`}
+          onClick={() => setSideTab("files")}
+        >
+          <span className={styles.sideTabIcon} aria-hidden>
+            <FolderTree />
+          </span>
+          <span className={styles.sideTabLabel}>文件</span>
+        </button>
+      </div>
+
+      <div className={styles.panel}>
           <div
-            style={{
-              height: virtualizer.getTotalSize(),
-              width: "100%",
-              position: "relative",
-            }}
+            ref={thumbsPaneRef}
+            className={`${styles.sidebar} flex min-h-0 flex-1 flex-col pb-2`}
+            role="tabpanel"
+            aria-hidden={sideTab !== "preview"}
+            style={{ display: sideTab === "preview" ? "flex" : "none" }}
           >
-            {virtualItems.map((virtualRow) => {
-              const page = pages[virtualRow.index];
-              if (!page) return null;
-              return (
+            <OverlayScrollbarsComponent
+              ref={scrollContainerRef}
+              className="min-h-0 flex-1"
+              style={{
+                height: scrollHeight > 0 ? `${scrollHeight}px` : "100%",
+                maxHeight: scrollHeight > 0 ? `${scrollHeight}px` : "100%",
+                padding: "8px 0 8px",
+                boxSizing: "border-box",
+              }}
+              options={{
+                scrollbars: {
+                  theme: "os-theme-light",
+                  autoHide: "leave",
+                  autoHideDelay: 300,
+                },
+                overflow: {
+                  x: "hidden",
+                  y: "scroll",
+                },
+              }}
+            >
+              {pages.length > 0 ? (
                 <div
-                  key={virtualRow.key}
-                  data-index={virtualRow.index}
-                  ref={virtualizer.measureElement}
                   style={{
-                    position: "absolute",
-                    top: 0,
-                    left: 0,
+                    height: virtualizer.getTotalSize(),
                     width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
-                    paddingBottom: ITEM_GAP,
-                    boxSizing: "border-box",
+                    position: "relative",
                   }}
                 >
-                  <PageItem
-                    page={page}
-                    index={virtualRow.index}
-                    totalPages={pages.length}
-                    pageActive={pageActive}
-                    onPageClick={handlePageClick}
-                    onContextMenu={handleContextMenu}
-                    onPlayPage={handlePlayPage}
-                    onMovePageUp={handleMovePageUp}
-                    onMovePageDown={handleMovePageDown}
-                    onAddPageAfter={handleAddPageAfter}
-                  />
+                  {virtualItems.map((virtualRow) => {
+                    const page = pages[virtualRow.index];
+                    if (!page) return null;
+                    return (
+                      <div
+                        key={virtualRow.key}
+                        data-index={virtualRow.index}
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          left: 0,
+                          width: "100%",
+                          height: `${itemSize}px`,
+                          transform: `translateY(${virtualRow.start}px)`,
+                          paddingBottom: ITEM_GAP,
+                          boxSizing: "border-box",
+                        }}
+                      >
+                        <PageItem
+                          page={page}
+                          index={virtualRow.index}
+                          totalPages={pages.length}
+                          pageActive={pageActive}
+                          onPageClick={handlePageClick}
+                          onContextMenu={handleContextMenu}
+                          onPlayPage={handlePlayPage}
+                          onMovePageUp={handleMovePageUp}
+                          onMovePageDown={handleMovePageDown}
+                          onAddPageAfter={handleAddPageAfter}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
-              );
-            })}
+              ) : (
+                <div className="flex h-full items-center justify-center px-[15px] text-sm text-chrome-muted">
+                  暂无页面数据
+                </div>
+              )}
+            </OverlayScrollbarsComponent>
+            <div ref={addButtonRef} className={styles.addPageWrap}>
+              <div
+                className={styles.addPageBtn}
+                onClick={handleAddPage}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleAddPage();
+                  }
+                }}
+              >
+                <Add theme="outline" size="15" fill="currentColor" />
+                <span>新建幻灯片</span>
+              </div>
+            </div>
           </div>
-        ) : (
-          <div className="flex items-center justify-center h-full text-chrome-muted text-sm px-[15px]">
-            暂无页面数据
+          <div
+            className={`${styles.sidebar} min-h-0 min-w-0 flex-1 overflow-hidden pt-2 pb-2`}
+            role="tabpanel"
+            aria-hidden={sideTab !== "files"}
+            style={{ display: sideTab === "files" ? "flex" : "none" }}
+          >
+            <TemplateFileTree />
           </div>
-        )}
-      </OverlayScrollbarsComponent>
-      <div ref={addButtonRef} className={styles.addPageWrap}>
-        <div
-          className={styles.addPageBtn}
-          onClick={handleAddPage}
-          role="button"
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") {
-              e.preventDefault();
-              handleAddPage();
-            }
-          }}
-        >
-          <Add theme="outline" size="15" fill="currentColor" />
-          <span>新建幻灯片</span>
-        </div>
       </div>
     </div>
   );

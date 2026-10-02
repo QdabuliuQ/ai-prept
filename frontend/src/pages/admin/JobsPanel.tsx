@@ -28,6 +28,7 @@ import {
   jobStatusBadge,
   LoadingButton,
   needsBrowserHtmlConvert,
+  pendingConvertTemplateIds,
   toneBadge,
   useConfirmDialog,
 } from "./shared";
@@ -68,76 +69,78 @@ export function JobsPanel() {
 
   const runBrowserConvert = useCallback(
     async (job: GenerateJob) => {
-      const tid =
-        job.convertTemplateId ||
-        job.templateId ||
-        job.templateIds?.[0] ||
-        "";
-      if (
-        !tid ||
-        convertingRef.current.has(job.id) ||
-        convertFailedRef.current.has(job.id)
-      ) {
-        return;
-      }
-      convertingRef.current.add(job.id);
-      try {
-        toast.message(`浏览器转换中… ${tid}`);
-        const buffer = await adminFetchBinary(
-          `/api/admin/templates/${encodeURIComponent(tid)}/source.pptx`,
-        );
-        let labelZh = "";
+      const pending = pendingConvertTemplateIds(job);
+      for (const tid of pending) {
+        const key = `${job.id}:${tid}`;
+        if (
+          !tid ||
+          convertingRef.current.has(key) ||
+          convertFailedRef.current.has(key)
+        ) {
+          continue;
+        }
+        convertingRef.current.add(key);
         try {
-          const detail = await adminFetch(
-            `/api/admin/templates/${encodeURIComponent(tid)}`,
+          toast.message(`浏览器转换中… ${tid}`);
+          const buffer = await adminFetchBinary(
+            `/api/admin/templates/${encodeURIComponent(tid)}/source.pptx`,
           );
-          const label = detail?.label;
-          if (label && typeof label === "object") {
-            labelZh = String(label.zh_CN || label.en_US || "").trim();
+          let labelZh = "";
+          try {
+            const detail = await adminFetch(
+              `/api/admin/templates/${encodeURIComponent(tid)}`,
+            );
+            const label = detail?.label;
+            if (label && typeof label === "object") {
+              labelZh = String(label.zh_CN || label.en_US || "").trim();
+            }
+          } catch {
+            /* optional: backend will preserve prior label */
           }
-        } catch {
-          /* optional: backend will preserve prior label */
-        }
-        if (!labelZh || labelZh === tid) {
-          labelZh = "";
-        }
-        const result = await pptxBrowserConvert(buffer, {
-          labelZh: labelZh || tid,
-        });
-        await adminFetch(
-          `/api/admin/templates/${encodeURIComponent(tid)}/import-html-package`,
-          {
-            method: "POST",
-            body: JSON.stringify({
-              // 空字符串让后端保留 template.json 里已有的中文名
-              labelZh: labelZh || undefined,
-              slides: result.slides,
-              images: result.images,
-              warnings: result.warnings,
-              theme: result.theme,
-            }),
-          },
-        );
-        try {
+          if (!labelZh || labelZh === tid) {
+            labelZh = "";
+          }
+          const result = await pptxBrowserConvert(buffer, {
+            labelZh: labelZh || tid,
+          });
           await adminFetch(
-            `/api/admin/generate/${encodeURIComponent(job.id)}/mark-converted`,
-            { method: "POST", body: "{}" },
+            `/api/admin/templates/${encodeURIComponent(tid)}/import-html-package`,
+            {
+              method: "POST",
+              body: JSON.stringify({
+                // 空字符串让后端保留 template.json 里已有的中文名
+                labelZh: labelZh || undefined,
+                slides: result.slides,
+                images: result.images,
+                warnings: result.warnings,
+                theme: result.theme,
+              }),
+            },
           );
-        } catch {
-          /* mark-converted optional if already succeeded */
+          try {
+            await adminFetch(
+              `/api/admin/generate/${encodeURIComponent(job.id)}/mark-converted`,
+              {
+                method: "POST",
+                body: JSON.stringify({ templateId: tid }),
+              },
+            );
+          } catch {
+            /* mark-converted optional if already succeeded */
+          }
+          convertFailedRef.current.delete(key);
+          toast.success(`HTML 转换完成：${tid}（${result.slides.length} 页）`);
+          await load();
+        } catch (e) {
+          convertFailedRef.current.add(key);
+          toast.error(
+            e instanceof Error
+              ? `浏览器转换失败：${e.message}`
+              : `浏览器转换失败：${String(e)}`,
+          );
+        } finally {
+          convertingRef.current.delete(key);
         }
-        convertFailedRef.current.delete(job.id);
-        toast.success(`HTML 转换完成：${tid}（${result.slides.length} 页）`);
-        await load();
-      } catch (e) {
-        convertFailedRef.current.add(job.id);
-        toast.error(
-          e instanceof Error
-            ? `浏览器转换失败：${e.message}`
-            : `浏览器转换失败：${String(e)}`,
-        );
-      } finally {
-        convertingRef.current.delete(job.id);
       }
     },
     [load],

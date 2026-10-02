@@ -49,6 +49,54 @@ FAMILY_GROUP_ZH = {
     "experimental": "实验",
 }
 
+# 明确要求纸感 / 暖奶油场的风格；其余风格禁止默认米色底
+_PAPER_WARM_STYLE_IDS = frozenset(
+    {
+        "sketch-notes",
+        "ink-notes",
+        "ink-wash",
+        "kraft-folder-emboss",
+        "letterpress-quiet",
+        "cafe-menu",
+        "recipe-card",
+        "receipt-thermal",
+        "morandi-matte-study",
+        "lab-notebook",
+        "dossier-archive",
+        "paper-cut",
+        "ceramic-studio",
+        "wireframe-ink",
+    }
+)
+_PAPER_WARM_ID_HINTS = (
+    "paper",
+    "kraft",
+    "sketch",
+    "ink",
+    "letterpress",
+    "receipt",
+    "recipe",
+    "cafe",
+    "morandi",
+    "dossier",
+    "notebook",
+    "journal",
+    "scrap",
+    "rice",
+    "ceramic",
+    "folder",
+)
+
+
+def is_paper_warm_style(style_id: str) -> bool:
+    """True when the style card legitimately asks for cream / kraft / warm paper."""
+    sid = (style_id or "").strip().lower()
+    if not sid:
+        return False
+    if sid in _PAPER_WARM_STYLE_IDS:
+        return True
+    return any(h in sid for h in _PAPER_WARM_ID_HINTS)
+
 # Extra metaphors that models often bake into pack titles (not content topics).
 _STYLE_TITLE_EXTRA = (
     "胶印狂潮",
@@ -370,6 +418,18 @@ def load_style_card(style_id: str) -> str:
         "orbital HUD rings, holographic panels — unless the selected style is "
         "dark-tech / glassmorphism / blueprint.\n"
     )
+    if is_paper_warm_style(sid):
+        header += (
+            "This style may use a warm paper / cream / kraft field when that is "
+            "part of its material language — still invent an original HEX set.\n"
+        )
+    else:
+        header += (
+            "Hard ban on default warm-cream grounds (#F4F1EA, #FAF7F2, #F5F0E8, "
+            "oatmeal, 米色/奶油/暖白) unless this style card explicitly requires "
+            "paper / kraft / rice-paper. Prefer cool white, cool gray, near-pure "
+            "white, tinted cool light, matte dark, or a vivid saturated field.\n"
+        )
     if body:
         return header + "\n## Style reference\n\n" + body
     return header + f"\n(No local reference file for {sid}; follow id semantics strictly.)\n"

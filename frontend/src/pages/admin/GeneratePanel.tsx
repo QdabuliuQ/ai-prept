@@ -193,6 +193,25 @@ export function GeneratePanel({
     (p) => p.id === imageProvider,
   );
   const imageModelOptions = selectedImageProvider?.models || [];
+  const llmModelValue = modelOptions.some((m) => m.id === llmModel)
+    ? llmModel
+    : undefined;
+  const imageModelValue = imageModelOptions.some((m) => m.id === imageModel)
+    ? imageModel
+    : undefined;
+
+  // Radix Select 在 value 不在选项里时会显示空白；切换供应商或目录刷新后对齐
+  useEffect(() => {
+    if (!modelOptions.length) return;
+    if (modelOptions.some((m) => m.id === llmModel)) return;
+    setLlmModel(modelOptions[0].id);
+  }, [llmProvider, llmModel, modelOptions]);
+
+  useEffect(() => {
+    if (!imageModelOptions.length) return;
+    if (imageModelOptions.some((m) => m.id === imageModel)) return;
+    setImageModel(imageModelOptions[0].id);
+  }, [imageProvider, imageModel, imageModelOptions]);
 
   const onProviderChange = (id: string) => {
     setLlmProvider(id);
@@ -682,9 +701,12 @@ export function GeneratePanel({
                       ))}
                     </SelectContent>
                   </Select>
-                  <Select value={llmModel} onValueChange={setLlmModel}>
+                  <Select
+                    value={llmModelValue}
+                    onValueChange={setLlmModel}
+                  >
                     <SelectTrigger className="min-w-[260px]">
-                      <SelectValue />
+                      <SelectValue placeholder="选择模型" />
                     </SelectTrigger>
                     <SelectContent>
                       {modelOptions.map((m) => (
@@ -732,12 +754,12 @@ export function GeneratePanel({
                     </SelectContent>
                   </Select>
                   <Select
-                    value={imageModel}
+                    value={imageModelValue}
                     onValueChange={setImageModel}
                     disabled={skipImage || mock}
                   >
                     <SelectTrigger className="min-w-[260px]">
-                      <SelectValue />
+                      <SelectValue placeholder="选择模型" />
                     </SelectTrigger>
                     <SelectContent>
                       {imageModelOptions.map((m) => (

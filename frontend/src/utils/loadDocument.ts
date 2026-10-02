@@ -6,6 +6,7 @@ import {
   menuActiveStore,
   pageActiveStore,
   pptStore,
+  usePPTStore,
 } from "@/store";
 
 export type PPTDocumentJSON = {
@@ -13,6 +14,11 @@ export type PPTDocumentJSON = {
   theme?: ThemeToken;
   /** 模板包 format：html-slide / ppt-master 时编辑器导出走 html-to-pptx */
   format?: string;
+  /** 当前模板包 id（agent-output/<id>） */
+  templateId?: string;
+  templateDir?: string;
+  /** 打开时附带的包内文件树 */
+  tree?: import("@/utils/templateTree").TemplateTreeNode[];
   pages: Page[];
   gridSize?: number;
   gridType?: "grid" | "line" | "none";
@@ -83,6 +89,15 @@ export function loadDocument(doc: PPTDocumentJSON) {
 
   const theme = doc.theme || inferThemeFromPages(normalized.pages);
   pptStore.setTheme(theme);
+
+  const tid =
+    (typeof doc.templateId === "string" && doc.templateId.trim()) ||
+    (typeof doc.templateDir === "string" && doc.templateDir.trim()) ||
+    null;
+  usePPTStore.getState().setTemplateId(tid);
+  usePPTStore
+    .getState()
+    .setTemplateTree(Array.isArray(doc.tree) ? doc.tree : []);
 
   menuActiveStore.resetMenu();
   pageActiveStore.setPageActive(normalized.pages[0]?.id ?? null);

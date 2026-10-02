@@ -91,11 +91,19 @@ async def post_job(job_id: str, request: Request):
 
 
 @router.post("/api/admin/generate/{job_id}/mark-converted")
-def mark_converted(job_id: str):
+async def mark_converted(job_id: str, request: Request):
     from admin.jobs import mark_job_converted
 
     try:
-        job = mark_job_converted(job_id)
+        body = await request.json()
+    except Exception:
+        body = {}
+    template_id = ""
+    if isinstance(body, dict):
+        template_id = str(body.get("templateId") or body.get("template_id") or "").strip()
+
+    try:
+        job = mark_job_converted(job_id, template_id or None)
         return {"job": job}
     except FileNotFoundError:
         return err(404, error="NOT_FOUND")

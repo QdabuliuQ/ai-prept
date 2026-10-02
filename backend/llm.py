@@ -294,13 +294,22 @@ def _llm_thinking_on() -> bool:
     return raw in {"1", "true", "yes", "on", "enabled"}
 
 
-def _deepseek_thinking_extra(model: str) -> dict[str, Any] | None:
-    """DeepSeek V4：思考模式开关。
+def _thinking_type_extra(model: str) -> dict[str, Any] | None:
+    """OpenAI 兼容 `thinking.type`（DeepSeek / 商汤网关模型）。
 
-    LLM_THINKING：1 → enabled；否则 disabled（默认关，避免长 reasoning 暴涨费用）。
-    仅当 model id 含 deepseek 时注入。
+    LLM_THINKING：1 → enabled；否则 disabled（默认关）。
+    商汤 flash-lite / glm 等默认会开思考，短回答也会拖到数十秒且吃光
+    max_tokens（只剩 reasoning、content 为空）。
     """
-    if "deepseek" not in (model or "").lower():
+    m = (model or "").lower()
+    base = (os.environ.get("LLM_BASE_URL") or "").lower()
+    on_sensenova = "sensenova.cn" in base
+    if not (
+        "deepseek" in m
+        or m.startswith("sensenova")
+        or (on_sensenova and m.startswith("glm"))
+        or (on_sensenova and m.startswith("kimi"))
+    ):
         return None
     mode = "enabled" if _llm_thinking_on() else "disabled"
     return {"thinking": {"type": mode}}
@@ -353,7 +362,7 @@ def _qwen_thinking_extra(model: str) -> dict[str, Any] | None:
 def _chat_extra_body(model: str) -> dict[str, Any] | None:
     extra: dict[str, Any] = {}
     for part in (
-        _deepseek_thinking_extra(model),
+        _thinking_type_extra(model),
         _gemini_thinking_extra(model),
         _qwen_thinking_extra(model),
     ):

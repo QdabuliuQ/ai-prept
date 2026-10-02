@@ -65,8 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
     pm.add_argument(
         "--slide-concurrency",
         type=int,
-        default=6,
-        help="单包内 SVG 并行数，默认 6（上限见 AGENT_SLIDE_CONCURRENCY_MAX，默认 8）",
+        default=3,
+        help="单包内 SVG 并行数，默认 3（上限见 AGENT_SLIDE_CONCURRENCY_MAX，默认 8）",
     )
     pm.add_argument(
         "--fast-preview",
@@ -214,6 +214,11 @@ def build_parser() -> argparse.ArgumentParser:
         default="pending",
         help="新模板状态（首页 remix 用 approved 以便直接进编辑器）",
     )
+    rx.add_argument(
+        "--ephemeral",
+        action="store_true",
+        help="标记为临时会话包（首页 remix：写 sessions/，不进模板库）",
+    )
 
     rw = sub.add_parser(
         "rewrite-page",
@@ -241,6 +246,89 @@ def build_parser() -> argparse.ArgumentParser:
     )
     rw.add_argument("--mock", action="store_true", help="不调 LLM，写注释标记")
     rw.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="可选：写入 JSON 报告（数组）",
+    )
+
+    gp = sub.add_parser(
+        "generate-page",
+        help="按要求在模板包中新增一页 HTML（保留 theme 与本地图）",
+    )
+    gp.add_argument(
+        "package",
+        help="模板 id 或目录（默认在 agent-output/ 下）",
+    )
+    gp.add_argument(
+        "--issue",
+        required=True,
+        help="新页内容要求",
+    )
+    gp.add_argument(
+        "--after-file",
+        default="",
+        help="插入到该页之后（相对路径，如 slides/cover.html）",
+    )
+    gp.add_argument(
+        "--after-page-index",
+        type=int,
+        default=None,
+        help="插入到该 0-based 页码之后",
+    )
+    gp.add_argument(
+        "--title-hint",
+        default="",
+        help="可选标题提示",
+    )
+    gp.add_argument("--mock", action="store_true", help="不调 LLM，写 mock 页")
+    gp.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="可选：写入 JSON 报告（数组）",
+    )
+
+    dp = sub.add_parser(
+        "delete-page",
+        help="从模板包删除一页 HTML（至少保留一页）",
+    )
+    dp.add_argument("package", help="模板 id 或目录（默认在 agent-output/ 或 workspace/）")
+    dp.add_argument("--file", default="", help="页面相对路径，如 slides/cover.html")
+    dp.add_argument(
+        "--page-index",
+        type=int,
+        default=None,
+        help="0-based 页码（与 --file 二选一）",
+    )
+    dp.add_argument(
+        "--report",
+        type=Path,
+        default=None,
+        help="可选：写入 JSON 报告（数组）",
+    )
+
+    asst = sub.add_parser(
+        "editor-assist",
+        help="AI 帮写：规划并串行执行 modify / regenerate_image / add / delete",
+    )
+    asst.add_argument("package", help="模板 id 或目录（workspace / agent-output）")
+    asst.add_argument("--issue", required=True, help="用户自然语言指令")
+    asst.add_argument("--file", default="", help="当前页相对路径，如 slides/cover.html")
+    asst.add_argument(
+        "--page-index",
+        type=int,
+        default=None,
+        help="当前页 0-based 页码（与 --file 二选一或同时）",
+    )
+    asst.add_argument("--mock", action="store_true", help="不调 LLM / 生图 API")
+    asst.add_argument(
+        "--target-json",
+        type=Path,
+        default=None,
+        help="可选：画布选中元素 JSON 文件（selector / data-slot / imageSrc 等）",
+    )
+    asst.add_argument(
         "--report",
         type=Path,
         default=None,
@@ -437,7 +525,7 @@ def _cmd_ppt_master(args: argparse.Namespace) -> int:
         mock=mock,
         skip_images=skip_images,
         palette_refine=palette_refine,
-        slide_concurrency=max(1, int(args.slide_concurrency or 6)),
+        slide_concurrency=max(1, int(args.slide_concurrency or 3)),
         fast_preview=bool(args.fast_preview),
         svg_repair=bool(getattr(args, "svg_repair", True)),
         quality_gate=str(getattr(args, "quality_gate", None) or "soft"),
@@ -513,6 +601,7 @@ def _cmd_remix_template(args: argparse.Namespace) -> int:
             mock=bool(args.mock) or is_mock(),
             skip_images=skip_images,
             status=str(getattr(args, "status", None) or "pending"),
+            ephemeral=bool(getattr(args, "ephemeral", False)),
             log=lambda s: print(s, end="" if s.endswith("\n") else "\n", flush=True),
         )
     except Exception as e:
@@ -542,12 +631,12 @@ def _cmd_remix_template(args: argparse.Namespace) -> int:
 
 def _cmd_rewrite_page(args: argparse.Namespace) -> int:
     from templates.page_rewrite import run_page_rewrite
-    from ppt_master.paths import repo_root
+    from admin.fsutil import template_dir
 
     package = str(args.package).strip()
     root = Path(package).expanduser()
     if not root.is_dir():
-        root = (repo_root() / "agent-output" / package).resolve()
+        root = template_dir(package)
     issue = str(args.issue or "").strip()
     try:
         row = run_page_rewrite(
@@ -583,6 +672,157 @@ def _cmd_rewrite_page(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_generate_page(args: argparse.Namespace) -> int:
+    from templates.page_generate import run_page_generate
+    from ppt_master.paths import repo_root
+
+    package = str(args.package).strip()
+    root = Path(package).expanduser()
+    if not root.is_dir():
+        from admin.fsutil import template_dir
+
+        root = template_dir(package)
+    issue = str(args.issue or "").strip()
+    try:
+        row = run_page_generate(
+            root,
+            issue=issue,
+            after_file=(str(args.after_file).strip() or None),
+            after_page_index=getattr(args, "after_page_index", None),
+            title_hint=(str(args.title_hint).strip() or None),
+            mock=bool(args.mock) or is_mock(),
+            log=lambda s: print(s, end="" if s.endswith("\n") else "\n", flush=True),
+        )
+    except Exception as e:
+        print(f"[generate-page] FAIL — {e}", file=sys.stderr)
+        if args.report:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(
+                json.dumps(
+                    [{"ok": False, "error": str(e), "template_id": None}],
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        return 1
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(
+            json.dumps([row], ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[report] {args.report}")
+    print(
+        f"[summary] ok=1 fail=0 id={row.get('template_id')} "
+        f"file={row.get('file')} insertAt={row.get('insertAt')}"
+    )
+    return 0
+
+
+def _cmd_delete_page(args: argparse.Namespace) -> int:
+    from templates.page_delete import run_page_delete
+    from admin.fsutil import template_dir
+
+    package = str(args.package).strip()
+    root = Path(package).expanduser()
+    if not root.is_dir():
+        root = template_dir(package)
+    try:
+        row = run_page_delete(
+            root,
+            slide_file=(str(args.file).strip() or None),
+            page_index=getattr(args, "page_index", None),
+            log=lambda s: print(s, end="" if s.endswith("\n") else "\n", flush=True),
+        )
+    except Exception as e:
+        print(f"[delete-page] FAIL — {e}", file=sys.stderr)
+        if args.report:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(
+                json.dumps(
+                    [{"ok": False, "error": str(e), "template_id": None}],
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        return 1
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(
+            json.dumps([row], ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[report] {args.report}")
+    print(
+        f"[summary] ok=1 fail=0 id={row.get('template_id')} "
+        f"file={row.get('file')} activateFile={row.get('activateFile')}"
+    )
+    return 0
+
+
+def _cmd_editor_assist(args: argparse.Namespace) -> int:
+    from templates.editor_execute import run_editor_assist
+    from templates.element_target import normalize_element_target
+    from admin.fsutil import template_dir
+
+    package = str(args.package).strip()
+    root = Path(package).expanduser()
+    if not root.is_dir():
+        root = template_dir(package)
+    issue = str(args.issue or "").strip()
+    target = None
+    target_path = getattr(args, "target_json", None)
+    if target_path:
+        try:
+            raw = Path(target_path).read_text(encoding="utf-8")
+            target = normalize_element_target(json.loads(raw))
+        except Exception as e:
+            print(f"[editor-assist] FAIL — 无法读取 --target-json：{e}", file=sys.stderr)
+            return 1
+    try:
+        row = run_editor_assist(
+            root,
+            issue=issue,
+            slide_file=(str(args.file).strip() or None),
+            page_index=getattr(args, "page_index", None),
+            mock=bool(args.mock) or is_mock(),
+            target_element=target,
+            log=lambda s: print(s, end="" if s.endswith("\n") else "\n", flush=True),
+        )
+    except Exception as e:
+        print(f"[editor-assist] FAIL — {e}", file=sys.stderr)
+        if args.report:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_text(
+                json.dumps(
+                    [{"ok": False, "error": str(e), "template_id": None}],
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+        return 1
+    if args.report:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(
+            json.dumps([row], ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[report] {args.report}")
+    status = "ok" if row.get("ok") else "partial"
+    print(
+        f"[summary] {status} id={row.get('template_id')} "
+        f"intent={row.get('intent')} file={row.get('file')} "
+        f"images={row.get('regeneratedImages')}"
+    )
+    return 0 if row.get("ok") else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     load_env()
     argv = list(sys.argv[1:] if argv is None else argv)
@@ -602,6 +842,12 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_remix_template(args)
     if args.command == "rewrite-page":
         return _cmd_rewrite_page(args)
+    if args.command == "generate-page":
+        return _cmd_generate_page(args)
+    if args.command == "delete-page":
+        return _cmd_delete_page(args)
+    if args.command == "editor-assist":
+        return _cmd_editor_assist(args)
     if args.command == "ppt-master":
         return _cmd_ppt_master(args)
     if args.command == "gallery-serve":

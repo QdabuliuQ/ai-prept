@@ -54,13 +54,19 @@ export async function runExport(
 
   for (let i = 0; i < pages.length; i++) {
     throwIfAborted(options.signal);
-    options.onSlideProgress?.({ current: i, total, phase: "prepare" });
     try {
       prepared.push(await preparePage(pages[i], config, options));
     } catch (e) {
       if (!options.skipFailedPages) throw e;
       console.warn(`[html-to-pptx] skip failed page ${i + 1}`, e);
     }
+    // Report completed count so UI can show moving %; yield for toast repaint
+    options.onSlideProgress?.({
+      current: i + 1,
+      total,
+      phase: "prepare",
+    });
+    await waitFrames(1);
   }
 
   if (!prepared.length) throw new Error("No slides prepared");
@@ -70,5 +76,6 @@ export async function runExport(
     total,
     phase: "package",
   });
+  await waitFrames(1);
   return packagePresentation(prepared, config);
 }

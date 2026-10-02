@@ -39,6 +39,7 @@ export function postprocessSlideHtml({
   let out = html;
 
   out = rewritePaths(out);
+  out = fixGradientTextClipCss(out);
   const vectored = externalizeInlineSvgs(out, {
     imagesDir,
     slideStem,
@@ -69,6 +70,20 @@ export function postprocessSlideHtml({
     );
   }
   return { html: out, warnings, vectorCount: vectored.count };
+}
+
+/**
+ * Puppeteer/cssText often serializes gradient text as:
+ *   background: linear-gradient(...) text
+ * without a reliable -webkit-background-clip. Browsers then paint a gradient
+ * rectangle behind transparent glyphs → looks like a filled bar, not text.
+ */
+export function fixGradientTextClipCss(html) {
+  return String(html || "").replace(
+    /background\s*:\s*(linear-gradient\([^;]*?\))\s+text\s*;/gi,
+    (_full, grad) =>
+      `background-image:${grad};-webkit-background-clip:text;background-clip:text;`,
+  );
 }
 
 export function rewritePaths(html) {
