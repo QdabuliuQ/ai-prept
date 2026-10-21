@@ -125,7 +125,7 @@ export default function TemplatesPage() {
       try {
         const data = doc || (await fetchDoc(id));
         sessionStorage.setItem(
-          "webppt:pending-template-doc",
+          "ai-prept:pending-template-doc",
           JSON.stringify(data),
         );
         toast.success("模板已加载，正在打开编辑器");

@@ -72,7 +72,7 @@ type GalleryModelPrefs = {
   imageModel: string;
 };
 
-const GALLERY_MODEL_PREFS_KEY = "webppt:gallery-model-prefs";
+const GALLERY_MODEL_PREFS_KEY = "ai-prept:gallery-model-prefs";
 
 const dockSelectTriggerClass =
   "h-8 w-auto max-w-[10.5rem] shrink-0 gap-1 rounded-full border border-white/15 bg-white/10 px-3 text-[11px] font-medium text-white/85 shadow-none outline-none ring-0 ring-offset-0 hover:bg-white/14 hover:text-white hover:border-white/25 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:border-white/40 data-[state=open]:ring-0 data-[state=open]:border-white/40 disabled:opacity-50 [&>span]:line-clamp-1 [&>svg]:size-3 [&>svg]:opacity-60";
@@ -851,7 +851,10 @@ export default function GalleryHome() {
       const res = await fetch("/api/gallery/inspire", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: "{}",
+        body: JSON.stringify({
+          llmProvider: llmProvider || undefined,
+          llmModel: llmModel || undefined,
+        }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         prompt?: string;
@@ -920,7 +923,7 @@ export default function GalleryHome() {
       if (!jobId) throw new Error("未返回任务 id");
 
       sessionStorage.setItem(
-        "webppt:pending-remix-job",
+        "ai-prept:pending-remix-job",
         JSON.stringify({
           jobId,
           sourceTemplateId: tid,
@@ -1113,13 +1116,13 @@ export default function GalleryHome() {
         <div className="pointer-events-auto flex items-center gap-2.5">
           <img
             src={logo}
-            alt="Ai Prept"
+            alt="AI Prept"
             width={36}
             height={36}
             className="size-9 shrink-0 rounded-lg object-cover"
           />
           <span className="text-lg font-semibold tracking-tight text-white/95 sm:text-xl">
-            Ai Prept
+            AI Prept
           </span>
         </div>
       </header>
@@ -1384,7 +1387,7 @@ export default function GalleryHome() {
                 ) : (
                   <MousePointerClick className="size-3.5 shrink-0" />
                 )}
-                {inspiring ? "…" : "发现灵感"}
+                发现灵感
               </button>
               <GenerateCta
                 generating={generating}

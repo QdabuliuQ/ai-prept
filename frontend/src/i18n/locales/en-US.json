@@ -21,6 +21,8 @@
   },
   "aiChatPanel": {
     "title": "AI Assist",
+    "collapse": "Collapse panel",
+    "expand": "Expand AI Assist",
     "contextPage": "Page {{index}} / {{total}} · {{file}}",
     "needTemplate": "Generate a draft from Home first, or open a pack with an id",
     "needSourceFile": "This page has no linked HTML file",

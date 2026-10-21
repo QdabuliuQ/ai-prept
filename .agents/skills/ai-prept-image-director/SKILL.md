@@ -1,14 +1,14 @@
 ---
-name: webppt-image-director
-description: Direct and generate coherent Nano Banana imagery for WebPPT template decks. Use this skill whenever a WebPPT/PPT Master task needs AI images, image_hint/image_role/image_aspect planning, a consistent image suite, better Nano Banana quality, slide-safe composition, reference-image locking, candidate selection, or image-generation QA. Also use when generated slide images look generic, inconsistent, boxed, badly cropped, cover text has no safe space, or the user asks to improve WebPPT image quality. Do not use for SVG decorations, editable diagrams, charts, or icons that should remain native slide objects.
-compatibility: WebPPT repository; works with the installed nano-banana skill and backend/image/generate.py conventions.
+name: ai-prept-image-director
+description: Direct and generate coherent Nano Banana imagery for AI Prept template decks. Use this skill whenever an AI Prept/PPT Master task needs AI images, image_hint/image_role/image_aspect planning, a consistent image suite, better Nano Banana quality, slide-safe composition, reference-image locking, candidate selection, or image-generation QA. Also use when generated slide images look generic, inconsistent, boxed, badly cropped, cover text has no safe space, or the user asks to improve AI Prept image quality. Do not use for SVG decorations, editable diagrams, charts, or icons that should remain native slide objects.
+compatibility: AI Prept repository; works with the installed nano-banana skill and backend/image/generate.py conventions.
 ---
 
-# WebPPT Image Director
+# AI Prept Image Director
 
 Create an image suite that behaves like one commissioned art direction system, not a set of unrelated generations. Preserve slide editability by keeping titles, labels, data, logos, and diagrams out of raster images.
 
-## Use the existing WebPPT contract
+## Use the existing AI Prept contract
 
 Read the relevant `plan.json`, `plan_lock.json`, template metadata, visual style card, or slide brief before prompting. Keep these existing fields authoritative:
 
@@ -22,7 +22,7 @@ Read the relevant `plan.json`, `plan_lock.json`, template metadata, visual style
 
 Do not add images to every page. Data, comparison, agenda, and dense explanatory pages often work better with editable text and native shapes.
 
-When generation is requested, follow the installed `nano-banana` skill for model-specific prompting and reference-image behavior. For WebPPT pipeline runs, preserve the repository's configured `IMAGE_API_*` provider (including its OpenAI-compatible `nano-banana-fast` route); use the standalone Nano Banana CLI only for one-off assets or when the user explicitly requests it. This skill owns art direction, suite consistency, slide fit, selection, and QA.
+When generation is requested, follow the installed `nano-banana` skill for model-specific prompting and reference-image behavior. For AI Prept pipeline runs, preserve the repository's configured `IMAGE_API_*` provider (including its OpenAI-compatible `nano-banana-fast` route); use the standalone Nano Banana CLI only for one-off assets or when the user explicitly requests it. This skill owns art direction, suite consistency, slide fit, selection, and QA.
 
 ## Workflow
 

@@ -18,7 +18,7 @@ FORBIDDEN_KEYS = {
     "slides.slots",
 }
 
-# 生成期 HTML 安全检查（对齐 html-to-pptx / WebPPT 模板约定）
+# 生成期 HTML 安全检查（对齐 html-to-pptx / AI Prept 模板约定）
 EXPORT_FORBIDDEN_PATTERNS: list[tuple[str, str, str]] = [
     ("cdn_tailwind", r"cdn\.tailwindcss\.com", "禁止 Tailwind CDN"),
     ("cdn_fonts", r"fonts\.googleapis\.com", "禁止 Google Fonts CDN"),

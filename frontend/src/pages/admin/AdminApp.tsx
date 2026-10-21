@@ -70,7 +70,7 @@ function AdminShell() {
       <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur">
         <div className="mx-auto flex h-14 max-w-[1680px] items-center justify-between px-6">
           <h1 className="text-lg font-semibold tracking-tight">
-            WebPPT 模板后台
+            AI Prept 模板后台
           </h1>
           <nav className="flex items-center gap-1">
             <ThemeSwitcher />

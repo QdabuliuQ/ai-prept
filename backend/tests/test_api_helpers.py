@@ -42,11 +42,11 @@ def _request(
 def test_extract_token_priority_and_supported_credentials() -> None:
     request = _request(
         headers={"authorization": "Bearer from-auth"},
-        cookies={"webppt_admin_token": "from-cookie"},
+        cookies={"ai_prept_admin_token": "from-cookie"},
     )
     assert extract_token(request, "from-x-header", "Bearer ignored") == "from-x-header"
     assert extract_token(request, "", "Bearer from-auth") == "from-auth"
-    assert extract_token(_request(cookies={"webppt_admin_token": "from-cookie"})) == "from-cookie"
+    assert extract_token(_request(cookies={"ai_prept_admin_token": "from-cookie"})) == "from-cookie"
 
 
 def test_assert_admin_reports_missing_and_invalid_tokens(
@@ -100,7 +100,7 @@ def test_align_injection_only_targets_element_slides() -> None:
 
     html = '<html><head></head><body><div data-element="text"></div></body></html>'
     out = _inject_align(html)
-    assert out.count("webppt-data-element-preview-align") == 1
+    assert out.count("ai-prept-data-element-preview-align") == 1
     assert "justify-content:center" in out
 
 

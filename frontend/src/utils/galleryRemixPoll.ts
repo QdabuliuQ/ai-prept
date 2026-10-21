@@ -4,7 +4,7 @@ import { installSlideEmbedBridge } from "@/utils/slideEmbedBridge";
 import { pageActiveStore, pptStore, useGalleryRemixStore } from "@/store";
 import type { Page } from "@/store/ppt";
 
-export const PENDING_REMIX_JOB_KEY = "webppt:pending-remix-job";
+export const PENDING_REMIX_JOB_KEY = "ai-prept:pending-remix-job";
 
 export type PendingRemixJob = {
   jobId: string;

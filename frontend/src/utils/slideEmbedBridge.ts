@@ -12,9 +12,9 @@ export type SlideEmbedBridge = {
 
 declare global {
   interface Window {
-    __WEBPPT_SLIDE_BRIDGE__?: SlideEmbedBridge;
+    __AI_PREPT_SLIDE_BRIDGE__?: SlideEmbedBridge;
     /** /embed/slide iframe 读取页 HTML（与 bridge.getPageHtml 同实现） */
-    __webpptGetSlideHtml?: (
+    __ai_preptGetSlideHtml?: (
       pageId: string,
       token?: string | null,
     ) => string | null;
@@ -126,9 +126,9 @@ export function installSlideEmbedBridge() {
     }
     return null;
   };
-  window.__WEBPPT_SLIDE_BRIDGE__ = { getPageHtml };
+  window.__AI_PREPT_SLIDE_BRIDGE__ = { getPageHtml };
   // backend /embed/slide 壳调用此全局函数
-  window.__webpptGetSlideHtml = getPageHtml;
+  window.__ai_preptGetSlideHtml = getPageHtml;
 }
 
 /** 简易内容指纹，驱动 iframe 在 HTML 变化时刷新 */

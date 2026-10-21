@@ -65,8 +65,8 @@ function handleSetTransform(
 
 function startSlideEditor(): SlideEditorApi {
   const existing = (
-    window as Window & { __WEBPPT_SLIDE_EDITOR__?: SlideEditorApi }
-  ).__WEBPPT_SLIDE_EDITOR__;
+    window as Window & { __AI_PREPT_SLIDE_EDITOR__?: SlideEditorApi }
+  ).__AI_PREPT_SLIDE_EDITOR__;
   if (existing) return existing;
 
   const bridge = new EditorBridge();
@@ -164,14 +164,14 @@ function startSlideEditor(): SlideEditorApi {
       elementSelector.destroy();
       bridge.destroy();
       bridgeRef = null;
-      delete (window as Window & { __WEBPPT_SLIDE_EDITOR__?: SlideEditorApi })
-        .__WEBPPT_SLIDE_EDITOR__;
+      delete (window as Window & { __AI_PREPT_SLIDE_EDITOR__?: SlideEditorApi })
+        .__AI_PREPT_SLIDE_EDITOR__;
     },
   };
 
   (
-    window as Window & { __WEBPPT_SLIDE_EDITOR__?: SlideEditorApi }
-  ).__WEBPPT_SLIDE_EDITOR__ = api;
+    window as Window & { __AI_PREPT_SLIDE_EDITOR__?: SlideEditorApi }
+  ).__AI_PREPT_SLIDE_EDITOR__ = api;
 
   return api;
 }

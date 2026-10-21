@@ -2,7 +2,7 @@
 name: style-skill
 description: >-
   Author and expand PPT Master visual-style cards (visual-styles/*.md) for
-  WebPPT / ppt-master. Use whenever the user asks to write a new visual style,
+  AI Prept / ppt-master. Use whenever the user asks to write a new visual style,
   expand the style catalog, summarize style-card conventions, update
   visual-styles/_index.md, or mentions style-skill / visual-style / 风格卡 /
   视觉风格. Prefer this skill over inventing ad-hoc style formats — cards must
@@ -15,7 +15,7 @@ description: >-
 
 Write **visual style cards** that teach SVG layout taste for one deck-wide look.
 Runtime path: `ppt-master/skills/ppt-master/references/visual-styles/<id>.md`
-(loaded by WebPPT Agent via `load_style_card(id)`).
+(loaded by AI Prept Agent via `load_style_card(id)`).
 
 This skill is for **authoring cards in Cursor**. The generate pipeline only
 reads the `.md` files — it does not load this skill at runtime.
@@ -167,12 +167,12 @@ Fail any item → revise; do not ship.
 
 ```bash
 cd backend && .venv/bin/python scripts/build-visual-style-catalog.py
-# or: webppt-backend styles-catalog --list
+# or: ai-prept-backend styles-catalog --list
 ```
 
 4. Optionally sync Admin offline fallback `src/constants/pptMasterStyles.ts`
    (live Admin reads `_catalog.json` via `/api/admin/styles`)
-5. Smoke: `webppt-backend ppt-master --style <id> --pages 3 --mock -- "冒烟"`
+5. Smoke: `ai-prept-backend ppt-master --style <id> --pages 3 --mock -- "冒烟"`
 
 ## Progressive disclosure
 

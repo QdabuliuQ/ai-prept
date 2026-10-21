@@ -75,12 +75,12 @@ function delay(ms: number): Promise<void> {
 }
 
 function ensureMount(): HTMLDivElement {
-  let mount = document.getElementById("webppt-pptx-convert-mount") as
+  let mount = document.getElementById("ai-prept-pptx-convert-mount") as
     | HTMLDivElement
     | null;
   if (!mount) {
     mount = document.createElement("div");
-    mount.id = "webppt-pptx-convert-mount";
+    mount.id = "ai-prept-pptx-convert-mount";
     mount.setAttribute("aria-hidden", "true");
     Object.assign(mount.style, {
       position: "fixed",
@@ -502,7 +502,7 @@ async function materializeEphemeralImages(
   const imgs = [...root.querySelectorAll("img")];
   for (let idx = 0; idx < imgs.length; idx++) {
     const img = imgs[idx];
-    if (img.getAttribute("data-webppt-materialized") === "1") continue;
+    if (img.getAttribute("data-ai-prept-materialized") === "1") continue;
     const src = img.getAttribute("src") || "";
     await persist(src, (next) => img.setAttribute("src", next), `img#${idx}`);
   }
@@ -598,7 +598,7 @@ function promoteSvgImagesToImg(root: HTMLElement): number {
     const img = document.createElement("img");
     img.src = href;
     img.alt = "";
-    img.setAttribute("data-webppt-materialized", "1");
+    img.setAttribute("data-ai-prept-materialized", "1");
 
     const slotHost =
       (host?.closest("[data-slot]") as HTMLElement | null) ||
@@ -833,7 +833,7 @@ export async function pptxBrowserConvert(
               img.style.height = el.style.height || `${el.offsetHeight}px`;
             img.style.objectFit = "contain";
             // Keep data URL temporarily so materialize loop can skip; we already stored base64
-            img.setAttribute("data-webppt-materialized", "1");
+            img.setAttribute("data-ai-prept-materialized", "1");
             el.replaceWith(img);
             void mime;
           } catch (e) {

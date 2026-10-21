@@ -41,7 +41,10 @@ async def random_style(request: Request):
     exclude = body.get("exclude") if isinstance(body.get("exclude"), list) else []
     if mode == "invent":
         try:
-            return generate_random_style_intent()
+            return generate_random_style_intent(
+                llm_provider=str(body.get("llmProvider") or "") or None,
+                llm_model=str(body.get("llmModel") or "") or None,
+            )
         except Exception as e:  # noqa: BLE001
             return err(502, error=str(e))
     picked = pick_random(exclude=[str(x) for x in exclude])
@@ -67,7 +70,7 @@ async def ensure_style(request: Request):
         return err(400, error="INTENT_REQUIRED")
     create = body.get("create") is not False
     mock = bool(body.get("mock"))
-    cmd = repo_root() / "backend" / ".venv" / "bin" / "webppt-backend"
+    cmd = repo_root() / "backend" / ".venv" / "bin" / "ai-prept-backend"
     args = ["ensure-style", intent]
     if not create:
         args.append("--no-create")

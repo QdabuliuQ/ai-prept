@@ -21,7 +21,7 @@ import { toast } from "sonner";
 initPPTStore();
 installSlideEmbedBridge();
 
-const PENDING_TEMPLATE_KEY = "webppt:pending-template-doc";
+const PENDING_TEMPLATE_KEY = "ai-prept:pending-template-doc";
 
 function consumePendingTemplateDoc(): {
   ok: boolean;

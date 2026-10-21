@@ -38,7 +38,7 @@ export function RemixFailurePage() {
         >
           <img src={logo} alt="" className="h-7 w-7 object-contain" />
           <span className="text-[15px] font-semibold tracking-[0.02em] text-[#1c1917]">
-            Ai Prept
+            AI Prept
           </span>
         </button>
       </header>

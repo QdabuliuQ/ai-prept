@@ -21,6 +21,8 @@
   },
   "aiChatPanel": {
     "title": "AI 帮写",
+    "collapse": "收起面板",
+    "expand": "展开 AI 帮写",
     "contextPage": "第 {{index}} / {{total}} 页 · {{file}}",
     "needTemplate": "请先从首页生成临时稿，或打开带 id 的模板包",
     "needSourceFile": "当前页没有关联 HTML 文件",

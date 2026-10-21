@@ -1,10 +1,10 @@
 {
-  "skill_name": "webppt-image-director",
+  "skill_name": "ai-prept-image-director",
   "evals": [
     {
       "id": 1,
       "prompt": "为一套 7 页校园足球发布会模板规划 Nano Banana 配图。封面左侧放标题，右侧需要人物主视觉；章节页和愿景页也需要图，要求整套风格一致且正文可编辑。",
-      "expected_output": "A compact image-direction manifest using WebPPT fields, one reusable visual lock, correct slot-specific ratios and copy-safe regions, and no rasterized slide text or diagrams.",
+      "expected_output": "A compact image-direction manifest using AI Prept fields, one reusable visual lock, correct slot-specific ratios and copy-safe regions, and no rasterized slide text or diagrams.",
       "files": []
     },
     {

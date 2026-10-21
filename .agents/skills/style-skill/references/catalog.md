@@ -3,7 +3,7 @@
 Source of truth live files:
 `ppt-master/skills/ppt-master/references/visual-styles/`
 
-Machine index: `_catalog.json` (rebuild with `webppt-backend styles-catalog`).
+Machine index: `_catalog.json` (rebuild with `ai-prept-backend styles-catalog`).
 
 **New styles:** always `visual-styles/<id>.md` (root), with `Label-zh` / `Group-zh` / `Family`.
 Do **not** add new files under `variants/` unless the user explicitly asks for a variant.
@@ -20,7 +20,7 @@ Always re-check the directory before minting a new id — this snapshot can drif
 | Expressive / print | `memphis`, `zine`, `vintage-poster`, `paper-cut` |
 | Hand-drawn / brush | `sketch-notes`, `ink-notes`, `chalkboard`, `ink-wash` |
 | Specialty | `pixel-art` |
-| WebPPT extensions | `gallery-white`, `midnight-luxe`, `nordic-calm`, `kinetic-poster`, `dossier-archive` |
+| AI Prept extensions | `gallery-white`, `midnight-luxe`, `nordic-calm`, `kinetic-poster`, `dossier-archive` |
 
 ## Card index
 

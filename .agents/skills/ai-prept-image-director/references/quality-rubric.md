@@ -1,4 +1,4 @@
-# WebPPT image quality rubric
+# AI Prept image quality rubric
 
 Judge images at their real slide crop with representative editable copy overlaid.
 

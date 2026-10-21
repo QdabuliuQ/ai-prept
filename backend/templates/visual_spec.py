@@ -93,6 +93,7 @@ def _motif_samples(html: str) -> dict[str, list[str]]:
 
 
 def _compact_slots(html: str, *, file: str) -> list[dict[str, Any]]:
+    """Slot roles for visual-spec — omit sample copy so the bible stays skin-only."""
     rows: list[dict[str, Any]] = []
     for slot in inventory_slide_slots(html, file=file)[:_MAX_SLOTS_PER_PAGE]:
         row: dict[str, Any] = {
@@ -106,7 +107,8 @@ def _compact_slots(html: str, *, file: str) -> list[dict[str, Any]]:
         else:
             text = str(slot.get("current") or "").strip()
             if text:
-                row["text"] = text[:_SLOT_TEXT_CHARS]
+                # Length only: literal copy biases the LLM into content locks.
+                row["text_chars"] = min(len(text), _SLOT_TEXT_CHARS * 4)
             if slot.get("font_px"):
                 row["font_px"] = slot["font_px"]
         rows.append(row)
@@ -126,8 +128,9 @@ def _page_fingerprint(
     return {
         "file": file,
         "layout": layout,
-        "title": title,
-        "description": description[:_DESC_CHARS],
+        # Sample pack copy — for inventory only; must not become image/subject locks.
+        "sample_title": title,
+        "sample_description": description[:_DESC_CHARS],
         "html_chars": len(html),
         "svg_n": html.lower().count("<svg"),
         "images": images[:16],
@@ -200,8 +203,10 @@ def build_deck_context(package_dir: Path) -> dict[str, Any]:
                 {
                     "file": rel,
                     "layout": item.get("layout"),
-                    "title": item.get("title"),
-                    "description": (str(item.get("description") or ""))[:_DESC_CHARS],
+                    "sample_title": item.get("title"),
+                    "sample_description": (str(item.get("description") or ""))[
+                        :_DESC_CHARS
+                    ],
                     "missing": True,
                 }
             )
@@ -241,13 +246,17 @@ def build_deck_context(package_dir: Path) -> dict[str, Any]:
         "html_excerpts": html_excerpts,
         "missing_slides": missing_slides,
         "theme_css_excerpt": theme_excerpt,
+        "content_note": (
+            "sample_title / sample_description / HTML 文案仅为样例内容；"
+            "visual-spec 只锁版式、色板、形态与配图色调，不锁题材故事。"
+        ),
         # legacy key kept for mock / older callers that expect "slides"
         "slides": [
             {
                 "file": p.get("file"),
                 "layout": p.get("layout"),
-                "title": p.get("title"),
-                "description": p.get("description"),
+                "title": p.get("sample_title") or p.get("title"),
+                "description": p.get("sample_description") or p.get("description"),
             }
             for p in pages
         ],
@@ -303,7 +312,7 @@ def generate_visual_spec(
         outline = str(deck.get("visual_spec_outline") or "").strip()
         pages = deck.get("pages") or []
         layouts = [
-            str(p.get("layout") or p.get("title") or "")
+            str(p.get("layout") or p.get("sample_title") or p.get("title") or "")
             for p in pages
             if isinstance(p, dict)
         ]
@@ -329,8 +338,8 @@ def generate_visual_spec(
                 "- " + "\n- ".join(x for x in layouts if x) if layouts else "- （无 slides）",
                 "",
                 "## Locked vs editable",
-                "- Locked: 结构、装饰、主题色、非槽位样式",
-                "- Editable: `data-slot*` 文案与配图",
+                "- Locked: 版式结构、装饰几何、主题色、配图色调（不锁题材故事）",
+                "- Editable: `data-slot*` 文案与配图主体（服从配图色调）",
                 "",
                 "（mock 模式生成，已读页面指纹，未调用 LLM）",
                 "",

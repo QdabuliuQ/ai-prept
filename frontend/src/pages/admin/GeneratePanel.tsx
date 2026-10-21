@@ -275,7 +275,11 @@ export function GeneratePanel({
     try {
       const data = await adminFetch("/api/admin/prompt-random", {
         method: "POST",
-        body: JSON.stringify({ visualStyle }),
+        body: JSON.stringify({
+          visualStyle,
+          llmProvider,
+          llmModel,
+        }),
       });
       const next = String(data.prompt || "").trim();
       if (!next) throw new Error("未返回主题描述");
@@ -340,6 +344,8 @@ export function GeneratePanel({
           body: JSON.stringify({
             mode: randomStyleMode,
             exclude: [visualStyle],
+            llmProvider,
+            llmModel,
           }),
         });
         if (randomStyleMode === "invent") {
@@ -348,7 +354,11 @@ export function GeneratePanel({
           nextEnsure = styleData.ensureStyle !== false;
           setStyleIntent(nextIntent);
           setEnsureStyle(nextEnsure);
-          toast.info(`随机风格意图：${nextIntent}`);
+          toast.info(
+            styleData.model
+              ? `随机风格意图（${styleData.model}）：${nextIntent}`
+              : `随机风格意图：${nextIntent}`,
+          );
         } else {
           nextStyle = String(styleData.styleId || "").trim();
           if (!nextStyle) throw new Error("随机风格为空");
@@ -369,6 +379,8 @@ export function GeneratePanel({
           method: "POST",
           body: JSON.stringify({
             visualStyle: nextIntent ? undefined : nextStyle,
+            llmProvider,
+            llmModel,
           }),
         });
         nextPrompt = String(themeData.prompt || "").trim();
@@ -547,7 +559,7 @@ export function GeneratePanel({
                     ? reuseRandomTheme
                       ? "已开启随机：整批包共用同一次主题"
                       : "已开启随机：每包重新抽主题（串行）"
-                    : "已开启：提交时用 SCORE_VL 覆盖下方文案"
+                    : "已开启：提交时用下方所选语言模型覆盖文案"
                   : "写内容主题（产品/活动/议题），不要写视觉风格名。包名按主题命名。"
               }
             >

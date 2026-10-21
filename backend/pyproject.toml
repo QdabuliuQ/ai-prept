@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "webppt-backend"
+name = "ai-prept-backend"
 version = "0.3.0"
-description = "WebPPT backend: FastAPI + PPT Master generation pipeline"
+description = "AI Prept backend: FastAPI + PPT Master generation pipeline"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -39,7 +39,7 @@ api = [
 ]
 
 [project.scripts]
-webppt-backend = "cli:main"
+ai-prept-backend = "cli:main"
 
 [tool.setuptools]
 py-modules = ["cli", "config", "llm", "pricing", "public_id", "usage"]

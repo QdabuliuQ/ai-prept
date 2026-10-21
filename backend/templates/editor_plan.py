@@ -33,7 +33,7 @@ _IMAGE_RE = re.compile(
     re.I,
 )
 
-SYSTEM_PLAN = """你是 WebPPT 编辑助手的动作规划器。只输出 JSON：
+SYSTEM_PLAN = """你是 AI Prept 编辑助手的动作规划器。只输出 JSON：
 {
   "summary": "一句中文说明本次要做什么",
   "actions": [

@@ -31,11 +31,29 @@ import {
   type GalleryProviderOption,
 } from "@/utils/galleryModels";
 import { streamText } from "@/utils/streamText";
-import { ArrowUp, ImageIcon, Type, X } from "lucide-react";
+import { ArrowUp, ChevronsRight, ImageIcon, Type, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FC } from "react";
 import { useTranslation } from "react-i18next";
 import { EmptyDeckArt, PanelCornerPattern, TitleMark } from "./Decor";
 import styles from "./index.module.less";
+
+const COLLAPSED_KEY = "ai-prept:ai-chat-collapsed";
+
+function readCollapsedPref(): boolean {
+  try {
+    return sessionStorage.getItem(COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeCollapsedPref(collapsed: boolean) {
+  try {
+    sessionStorage.setItem(COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
 
 type ChatRole = "user" | "assistant" | "error" | "busy";
 
@@ -81,8 +99,14 @@ export const AiChatPanel: FC = () => {
   const pageActive = usePageActiveStore((s) => s.pageActive);
   const slideSelected = useSlideSelectionStore((s) => s.selected);
 
+  const [collapsed, setCollapsed] = useState(readCollapsedPref);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+
+  const setPanelCollapsed = (next: boolean) => {
+    setCollapsed(next);
+    writeCollapsedPref(next);
+  };
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   /** Pinned element target for the next assist turn (survives canvas deselect). */
   const [pinnedElement, setPinnedElement] = useState<AssistElementTarget | null>(
@@ -359,6 +383,27 @@ export const AiChatPanel: FC = () => {
 
   const modelSelectsDisabled = busy || !modelsReady;
 
+  if (collapsed) {
+    return (
+      <aside
+        className={`${styles.panel} ${styles.panelCollapsed}`}
+        aria-label={t("aiChatPanel.title")}
+      >
+        <button
+          type="button"
+          className={styles.rail}
+          onClick={() => setPanelCollapsed(false)}
+          title={t("aiChatPanel.expand")}
+          aria-expanded={false}
+          aria-label={t("aiChatPanel.expand")}
+        >
+          <TitleMark />
+          <span className={styles.railLabel}>{t("aiChatPanel.title")}</span>
+        </button>
+      </aside>
+    );
+  }
+
   return (
     <aside className={styles.panel} aria-label={t("aiChatPanel.title")}>
       <PanelCornerPattern />
@@ -368,6 +413,16 @@ export const AiChatPanel: FC = () => {
             <TitleMark />
             <h2 className={styles.title}>{t("aiChatPanel.title")}</h2>
           </div>
+          <button
+            type="button"
+            className={styles.headerToggle}
+            onClick={() => setPanelCollapsed(true)}
+            title={t("aiChatPanel.collapse")}
+            aria-expanded={true}
+            aria-label={t("aiChatPanel.collapse")}
+          >
+            <ChevronsRight className="size-4" />
+          </button>
         </div>
       </header>
 

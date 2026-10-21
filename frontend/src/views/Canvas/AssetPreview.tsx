@@ -14,7 +14,7 @@ function lookLikeImage(blob: Blob): boolean {
 
 function adminHeaders(): HeadersInit {
   try {
-    const token = localStorage.getItem("webppt_admin_token");
+    const token = localStorage.getItem("ai_prept_admin_token");
     if (token) return { "x-admin-token": token };
   } catch {
     /* ignore */

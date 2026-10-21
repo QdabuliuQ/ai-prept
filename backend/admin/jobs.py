@@ -1,4 +1,4 @@
-"""Admin generate / remix job runner — subprocess webppt-backend CLI."""
+"""Admin generate / remix job runner — subprocess ai-prept-backend CLI."""
 
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ def _initial_progress(total: int) -> dict[str, Any]:
 
 def _backend_bin() -> Path:
     backend = repo_root() / "backend"
-    return backend / ".venv" / "bin" / "webppt-backend"
+    return backend / ".venv" / "bin" / "ai-prept-backend"
 
 
 def get_job(job_id: str) -> dict[str, Any] | None:
@@ -375,13 +375,13 @@ def _spawn(job: dict[str, Any], args: list[str], extra_env: dict[str, str]) -> d
     cmd = _backend_bin()
     if not cmd.is_file():
         raise RuntimeError(
-            f"未找到 webppt-backend：{cmd}。请先在 backend/ 下创建 venv 并 pip install -e ."
+            f"未找到 ai-prept-backend：{cmd}。请先在 backend/ 下创建 venv 并 pip install -e ."
         )
     env = {**os.environ, "PYTHONUNBUFFERED": "1", **extra_env}
     job["status"] = "running"
     job["startedAt"] = _now()
     job["log"] = (job.get("log") or "") + (
-        "$ webppt-backend "
+        "$ ai-prept-backend "
         + " ".join(json.dumps(a) if re.search(r"\s", a) else a for a in args)
         + "\n"
     )
@@ -544,6 +544,8 @@ def _pick_pack_random(
     fallback_ensure: bool,
     fallback_prompt: str,
     mock: bool,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
 ) -> tuple[str, str, bool, str]:
     """Return (visual_style, style_intent, ensure_style, prompt) for one pack."""
     visual_style = fallback_style
@@ -560,7 +562,10 @@ def _pick_pack_random(
             else:
                 from admin.score_vl import generate_random_style_intent
 
-                data = generate_random_style_intent()
+                data = generate_random_style_intent(
+                    llm_provider=llm_provider,
+                    llm_model=llm_model,
+                )
                 style_intent = str(data.get("styleIntent") or "").strip()
                 ensure_style = data.get("ensureStyle") is not False
                 visual_style = fallback_style or "dark-tech"
@@ -584,7 +589,9 @@ def _pick_pack_random(
             from admin.score_vl import generate_random_theme_prompt
 
             theme = generate_random_theme_prompt(
-                visual_style="" if style_intent else visual_style
+                visual_style="" if style_intent else visual_style,
+                llm_provider=llm_provider,
+                llm_model=llm_model,
             )
             prompt = str(theme.get("prompt") or "").strip() or fallback_prompt
 
@@ -614,7 +621,7 @@ def _spawn_per_pack_random(
     cmd = _backend_bin()
     if not cmd.is_file():
         raise RuntimeError(
-            f"未找到 webppt-backend：{cmd}。请先在 backend/ 下创建 venv 并 pip install -e ."
+            f"未找到 ai-prept-backend：{cmd}。请先在 backend/ 下创建 venv 并 pip install -e ."
         )
 
     total = int(job.get("count") or 1)
@@ -648,6 +655,8 @@ def _spawn_per_pack_random(
                     fallback_ensure=fallback_ensure,
                     fallback_prompt=fallback_prompt,
                     mock=mock,
+                    llm_provider=str(job.get("llmProvider") or "") or None,
+                    llm_model=str(job.get("llmModel") or "") or None,
                 )
             except Exception as e:  # noqa: BLE001
                 fail += 1

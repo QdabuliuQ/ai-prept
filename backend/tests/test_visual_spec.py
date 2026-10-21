@@ -151,9 +151,28 @@ def test_build_deck_context_reads_pages(tmp_path: Path) -> None:
 def test_prompt_requires_grounding_in_pages() -> None:
     assert "HTML 指纹" in SYSTEM_VISUAL_SPEC
     assert "禁止凭空编造" in SYSTEM_VISUAL_SPEC
+    assert "配图色调" in SYSTEM_VISUAL_SPEC
+    assert "禁止" in SYSTEM_VISUAL_SPEC and "题材" in SYSTEM_VISUAL_SPEC
+    assert "主体完全跟用户新主题走" in SYSTEM_VISUAL_SPEC or "主体" in SYSTEM_VISUAL_SPEC
     user = user_visual_spec(deck_json='{"pages":[]}')
     assert "html_excerpts" in user
     assert "slot_role_summary" in user
+    assert "配图色调" in user
+    assert "样例内容" in user
+    assert "内容锁" in user
+
+
+def test_deck_context_omits_slot_sample_copy(tmp_path: Path) -> None:
+    pack = _write_pack(tmp_path)
+    deck = build_deck_context(pack)
+    assert "content_note" in deck
+    cover = deck["pages"][0]
+    assert cover.get("sample_title") == "封面标题"
+    assert "title" not in cover or cover.get("title") is None
+    for slot in cover["slots"]:
+        assert "text" not in slot
+        if slot.get("type") != "image" and slot.get("role") == "page-title":
+            assert slot.get("text_chars", 0) > 0
 
 
 def test_generate_visual_spec_mock_reads_pages(tmp_path: Path) -> None:

@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="frontend/public/brand/ai-prept-logo.png" alt="Ai Prept" width="96" />
+<img src="frontend/public/brand/ai-prept-logo.png" alt="AI Prept" width="96" />
 
-# WebPPT / Ai Prept
+# AI Prept
 
 基于 HTML 幻灯片的模板墙、可视化编辑器与生成管线
 
@@ -47,14 +47,14 @@
 docker compose up -d
 ```
 
-Postgres 映射到 `127.0.0.1:5433`（用户 / 密码 / 库均为 `webppt`）。
+Postgres 映射到 `127.0.0.1:5433`（用户 / 密码 / 库均为 `ai-prept`）。
 
 ### 2. 环境变量
 
 ```bash
 cp .env.example .env.local
 # 按需填写 LLM / 图片 API Key，并确认：
-# DATABASE_URL=postgresql://webppt:webppt@127.0.0.1:5433/webppt
+# DATABASE_URL=postgresql://ai-prept:ai-prept@127.0.0.1:5433/ai-prept
 # ADMIN_TOKEN=...
 ```
 
@@ -69,8 +69,8 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -U pip setuptools wheel
 pip install -e '.[api]'
 
-webppt-backend gallery-sync
-webppt-backend serve
+ai-prept-backend gallery-sync
+ai-prept-backend serve
 ```
 
 或在仓库根目录（需已建好 `backend/.venv`）：
@@ -127,7 +127,7 @@ npm run preview    # 预览生产构建（同端口策略见 vite 配置）
 | 命令 | 说明 |
 |------|------|
 | `npm run dev` | 前端开发服务器 |
-| `npm run dev:api` | 启动后端 `webppt-backend serve` |
+| `npm run dev:api` | 启动后端 `ai-prept-backend serve` |
 | `npm run build` | 生产构建 |
 | `npm run preview` / `start` | 预览生产构建 |
 | `npm run lint` | ESLint |
@@ -153,17 +153,17 @@ npm run preview    # 预览生产构建（同端口策略见 vite 配置）
 在 `backend/` 激活 venv 后：
 
 ```bash
-webppt-backend doctor              # 检查 LLM 配置
-webppt-backend gallery-sync        # 从磁盘同步模板到 Postgres
-webppt-backend serve               # API :8787（同 gallery-serve）
-webppt-backend remix-template ...  # 基于源模板套用内容
-webppt-backend ppt-master ...      # PPT Master 生成管线
-webppt-backend styles-catalog      # 风格卡目录
-webppt-backend visual-spec ...     # 设计规范
-webppt-backend rewrite-page ...    # 单页改写
+ai-prept-backend doctor              # 检查 LLM 配置
+ai-prept-backend gallery-sync        # 从磁盘同步模板到 Postgres
+ai-prept-backend serve               # API :8787（同 gallery-serve）
+ai-prept-backend remix-template ...  # 基于源模板套用内容
+ai-prept-backend ppt-master ...      # PPT Master 生成管线
+ai-prept-backend styles-catalog      # 风格卡目录
+ai-prept-backend visual-spec ...     # 设计规范
+ai-prept-backend rewrite-page ...    # 单页改写
 ```
 
-更多参数见 `webppt-backend <command> -h` 与 [`backend/README.md`](backend/README.md)。
+更多参数见 `ai-prept-backend <command> -h` 与 [`backend/README.md`](backend/README.md)。
 
 ---
 
@@ -184,18 +184,4 @@ webppt-backend rewrite-page ...    # 单页改写
 1. Fork 本仓库并创建分支  
 2. `npm install`，按「快速开始」拉起 DB / API / 前端  
 3. 提交前可运行 `npm run lint`  
-4. 发起 Pull Request  
-
-远程仓库：[QdabuliuQ/Web-PPT-React](https://github.com/QdabuliuQ/Web-PPT-React)
-
----
-
-## Star History
-
-<a href="https://star-history.com/#QdabuliuQ/Web-PPT-React&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=QdabuliuQ/Web-PPT-React&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=QdabuliuQ/Web-PPT-React&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=QdabuliuQ/Web-PPT-React&type=Date" />
-  </picture>
-</a>
+4. 发起 Pull Request

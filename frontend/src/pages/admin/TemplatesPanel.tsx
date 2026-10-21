@@ -485,7 +485,7 @@ export function TemplatesPanel({
         throw new Error("模板没有可加载的页面");
       }
       sessionStorage.setItem(
-        "webppt:pending-template-doc",
+        "ai-prept:pending-template-doc",
         JSON.stringify(data),
       );
       toast.success("模板已加载，正在打开编辑器");

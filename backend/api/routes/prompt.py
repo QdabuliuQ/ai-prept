@@ -15,12 +15,20 @@ async def prompt_random(request: Request):
     from admin.score_vl import generate_random_theme_prompt
 
     visual_style = ""
+    llm_provider = None
+    llm_model = None
     try:
         body = await request.json()
         visual_style = str(body.get("visualStyle") or "")
+        llm_provider = body.get("llmProvider")
+        llm_model = body.get("llmModel")
     except Exception:
         pass
     try:
-        return generate_random_theme_prompt(visual_style=visual_style)
+        return generate_random_theme_prompt(
+            visual_style=visual_style,
+            llm_provider=str(llm_provider) if llm_provider else None,
+            llm_model=str(llm_model) if llm_model else None,
+        )
     except Exception as e:  # noqa: BLE001
         return err(502, error=str(e))

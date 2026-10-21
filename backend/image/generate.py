@@ -548,8 +548,8 @@ def extract_theme_colors(theme_css: str) -> dict[str, str]:
     specs: tuple[tuple[str, tuple[str, ...]], ...] = (
         ("bg", ("--bg", "--color-bg", "--background")),
         ("surface", ("--surface", "--paper", "--color-surface")),
-        ("primary", ("--primary", "--color-primary", "--accent")),
-        ("ink", ("--ink", "--color-ink", "--fg", "--color-fg", "--text")),
+        ("primary", ("--primary", "--color-primary", "--accent", "--color-accent")),
+        ("ink", ("--ink", "--color-ink", "--fg", "--color-fg", "--text", "--color-text")),
     )
     for role, vars_ in specs:
         for var in vars_:
@@ -561,6 +561,274 @@ def extract_theme_colors(theme_css: str) -> dict[str, str]:
                 out[role] = m.group(1)
                 break
     return out
+
+
+def _parse_hex_rgb(hex_color: str) -> tuple[int, int, int] | None:
+    s = (hex_color or "").strip().lstrip("#")
+    if len(s) == 3:
+        s = "".join(ch * 2 for ch in s)
+    elif len(s) == 4:
+        s = "".join(ch * 2 for ch in s[:3])
+    elif len(s) == 8:
+        s = s[:6]
+    if len(s) != 6 or any(c not in "0123456789abcdefABCDEF" for c in s):
+        return None
+    return int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16)
+
+
+def hex_relative_luminance(hex_color: str) -> float | None:
+    """sRGB relative luminance 0..1; None if unparseable."""
+    rgb = _parse_hex_rgb(hex_color)
+    if rgb is None:
+        return None
+
+    def _lin(c: int) -> float:
+        x = c / 255.0
+        return x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4
+
+    r, g, b = (_lin(v) for v in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def is_dark_hex(hex_color: str, *, threshold: float = 0.28) -> bool:
+    lum = hex_relative_luminance(hex_color)
+    return lum is not None and lum < threshold
+
+
+def _iter_markdown_sections(text: str) -> list[tuple[str, str]]:
+    section_re = re.compile(
+        r"^#{1,3}\s*(?P<title>[^\n]+)\n(?P<body>.*?)(?=^#{1,3}\s|\Z)",
+        re.M | re.S,
+    )
+    out: list[tuple[str, str]] = []
+    for m in section_re.finditer(text or ""):
+        title = (m.group("title") or "").strip()
+        body = (m.group("body") or "").strip()
+        if title and body:
+            out.append((title, body))
+    return out
+
+
+def extract_image_color_brief(visual_spec: str, *, max_chars: int = 700) -> str:
+    """Pull palette / imagery-color guidance from visual-spec.md (not art medium)."""
+    text = (visual_spec or "").strip()
+    if not text:
+        return ""
+    # Ranked: 配图色调 first (exact), then 色板, then generic 配图 / avoid lists.
+    ranked: list[tuple[int, str]] = []
+    for title, body in _iter_markdown_sections(text):
+        t = title.lower()
+        chunk = f"{title}\n{body}"
+        if "配图色调" in title or "imagery color" in t or "image color" in t:
+            ranked.append((0, chunk))
+        elif "色板" in title or "palette" in t:
+            ranked.append((1, chunk))
+        elif title.strip() in {"配图", "配图策略"} or t in {"imagery", "images"}:
+            ranked.append((3, chunk))
+        elif "避免" in title or "avoid" in t:
+            ranked.append((4, chunk))
+        elif "色彩" in title or "color" in t:
+            ranked.append((2, chunk))
+    ranked.sort(key=lambda x: x[0])
+    blob = "\n\n".join(c for _, c in ranked).strip() if ranked else text
+    blob = re.sub(r"\n{3,}", "\n\n", blob).strip()
+    return blob[:max_chars].strip()
+
+
+_HEX_TOKEN_RE = re.compile(r"#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})\b")
+
+
+def _hex_norm(hex_color: str) -> str | None:
+    rgb = _parse_hex_rgb(hex_color)
+    if rgb is None:
+        return None
+    return f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
+
+
+def extract_palette_from_visual_spec(visual_spec: str) -> dict[str, str]:
+    """Parse bg/surface/primary/ink hex from visual-spec 色板 / 配图色调 prose."""
+    text = (visual_spec or "").strip()
+    if not text:
+        return {}
+    # Include ## 色板 and ### 实际页面用色 (table often lives under the subsection).
+    bodies: list[str] = []
+    for title, body in _iter_markdown_sections(text):
+        if any(
+            k in title
+            for k in (
+                "色板",
+                "配图色调",
+                "实际页面用色",
+                "页面用色",
+                "palette",
+                "配色",
+            )
+        ):
+            bodies.append(f"{title}\n{body}")
+    blob = "\n".join(bodies) if bodies else text
+
+    out: dict[str, str] = {}
+    role_patterns: tuple[tuple[str, tuple[str, ...]], ...] = (
+        (
+            "bg",
+            (
+                r"(?:页面底色|深空|画布底|底色|canvas|base\s*bg)\s*[^\n#]{0,80}?(#(?:[0-9A-Fa-f]{3,8}))",
+                r"\|\s*(?:页面底色|深空|底色)[^\n|]*\|[^\n#|]*?(#(?:[0-9A-Fa-f]{3,8}))",
+            ),
+        ),
+        (
+            "surface",
+            (
+                r"(?:面板|深蓝面|surface|paper)\s*[^\n#]{0,80}?(#(?:[0-9A-Fa-f]{3,8}))",
+                r"\|\s*(?:面板|深蓝面|surface)[^\n|]*\|[^\n#|]*?(#(?:[0-9A-Fa-f]{3,8}))",
+            ),
+        ),
+        (
+            "primary",
+            (
+                r"(?:主强调|强调色|金色|accent|primary)\s*[^\n#]{0,80}?(#(?:[0-9A-Fa-f]{3,8}))",
+                r"\|\s*(?:主强调|金色|强调)[^\n|]*\|[^\n#|]*?(#(?:[0-9A-Fa-f]{3,8}))",
+            ),
+        ),
+        (
+            "ink",
+            (
+                r"(?:浅纸色|前景文字|正文色|ink)\s*[^\n#]{0,80}?(#(?:[0-9A-Fa-f]{3,8}))",
+                r"\|\s*(?:浅纸色|前景文字|正文)[^\n|]*\|[^\n#|]*?(#(?:[0-9A-Fa-f]{3,8}))",
+            ),
+        ),
+    )
+    for role, patterns in role_patterns:
+        for pat in patterns:
+            m = re.search(pat, blob, flags=re.I)
+            if not m:
+                continue
+            hx = _hex_norm(m.group(1))
+            if hx:
+                out[role] = hx
+                break
+    # Fallback: first dark hex in 配图色调 as bg when labeled 偏暗
+    if "bg" not in out:
+        for title, body in _iter_markdown_sections(text):
+            if "配图色调" not in title:
+                continue
+            if "偏暗" in body or "暗调" in body or "低键" in body:
+                for tok in _HEX_TOKEN_RE.findall(body):
+                    hx = _hex_norm(tok)
+                    if hx and is_dark_hex(hx):
+                        out["bg"] = hx
+                        break
+            break
+    return out
+
+
+def extract_slide_root_bg(package_dir: Path | None) -> dict[str, str]:
+    """Sample .pptx-slide-root / slide background from a few HTML pages."""
+    if package_dir is None:
+        return {}
+    slides = package_dir / "slides"
+    if not slides.is_dir():
+        return {}
+    files = sorted(slides.glob("*.html"))[:4]
+    bg_re = re.compile(
+        r"""(?:pptx-slide-root|slide-container|class=["'][^"']*slide[^"']*["'])[^>]{0,240}?"""
+        r"""background(?:-color)?\s*:\s*(?:"""
+        r"""(#[0-9A-Fa-f]{3,8})|"""
+        r"""rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\))""",
+        re.I | re.S,
+    )
+    for path in files:
+        try:
+            html = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        m = bg_re.search(html)
+        if not m:
+            continue
+        if m.group(1):
+            hx = _hex_norm(m.group(1))
+        else:
+            hx = _hex_norm(
+                f"#{int(m.group(2)):02x}{int(m.group(3)):02x}{int(m.group(4)):02x}"
+            )
+        if hx:
+            return {"bg": hx, "surface": hx}
+    return {}
+
+
+def resolve_image_theme_colors(
+    theme_css: str,
+    visual_spec: str = "",
+    *,
+    package_dir: Path | None = None,
+) -> dict[str, str]:
+    """Theme.css tokens are often PPTX convert stubs (white/blue); prefer real page palette.
+
+    Priority: visual-spec 色板/配图色调 → slide root background → theme.css.
+    """
+    theme = extract_theme_colors(theme_css)
+    slides = extract_slide_root_bg(package_dir)
+    spec = extract_palette_from_visual_spec(visual_spec)
+    out = dict(theme)
+    # Slide canvas is ground truth for bg when present
+    for role, val in slides.items():
+        if val:
+            out[role] = val
+    # visual-spec explicit roles win (documents real deck, not convert stubs)
+    for role, val in spec.items():
+        if val:
+            out[role] = val
+    # If convert stub left a light theme bg but 配图色调 says 偏暗, force dark from slides/spec.
+    # Match tendency phrases only — do NOT treat 「避免米色」 as wants_light.
+    brief = extract_image_color_brief(visual_spec)
+    wants_dark = bool(
+        re.search(
+            r"(?:明暗[^。\n]{0,12}偏暗|偏暗|暗调|低键|深空底|low[- ]?key)",
+            brief,
+            flags=re.I,
+        )
+    )
+    wants_light = bool(
+        re.search(
+            r"(?:明暗[^。\n]{0,12}偏亮|偏亮|亮色模板|浅色纸感|warm cream|light key)",
+            brief,
+            flags=re.I,
+        )
+    )
+    bg = out.get("bg") or ""
+    if wants_dark and bg and not is_dark_hex(bg):
+        for candidate in (spec.get("bg"), slides.get("bg")):
+            if candidate and is_dark_hex(candidate):
+                out["bg"] = candidate
+                out.setdefault("surface", candidate)
+                break
+    elif wants_light and bg and is_dark_hex(bg):
+        for candidate in (spec.get("bg"), slides.get("bg"), theme.get("bg")):
+            if candidate and not is_dark_hex(candidate):
+                out["bg"] = candidate
+                out.setdefault("surface", candidate)
+                break
+    return out
+
+
+def _palette_match_clause(
+    *,
+    bg: str,
+    surface: str,
+    palette_brief: str = "",
+) -> str:
+    """Lock image color key to this template (theme + visual-spec), any lightness."""
+    brief = re.sub(r"\s+", " ", (palette_brief or "").strip())
+    clause = (
+        f"TEMPLATE COLOR KEY (from this pack's theme/visual-spec): "
+        f"canvas/base {bg}, surface {surface}. "
+        "Subject/content may change; overall lightness and color temperature must "
+        "stay with THIS template — light/beige decks keep a light key, dark decks "
+        "keep a low key. Do not invert the plate to the opposite key. "
+    )
+    if brief:
+        clause += f"visual-spec color guidance: {brief} "
+    return clause
 
 
 def _infer_material_family(blob: str) -> str:
@@ -613,10 +881,11 @@ def build_shared_material_lock(
     bg_hex: str | None = None,
     alts: list[str] | None = None,
     theme_colors: dict[str, str] | None = None,
+    palette_brief: str = "",
 ) -> str:
     """
     整包共用材质锁定：色、纸感、颗粒、光感一致；槽位只改职责/浓淡，不另起炉灶。
-    解决同页多图「各说各话」导致的搭配突兀。
+    明暗/色温以该模板 theme + visual-spec 为准（米色偏亮、暗色偏低），不写死某一种禁止色。
     """
     colors = dict(theme_colors or {})
     bg = (bg_hex or colors.get("bg") or "#0B1220").strip()
@@ -633,33 +902,41 @@ def build_shared_material_lock(
     if ink:
         palette += f", ink/fg {ink}"
 
+    match = _palette_match_clause(
+        bg=bg, surface=surface, palette_brief=palette_brief
+    )
     common = (
         "SHARED MATERIAL LOCK (identical across every asset in this deck): "
         f"one cohesive suite — same paper/grain, same color temperature, same lighting grade; "
         f"palette {palette}. "
         "Do NOT invent a second paper stock, colder grain, or unrelated palette. "
         "No text, logos, watermarks, UI chrome, photo frames, or hard white borders. "
+        f"{match}"
     )
 
     if family == "ink":
         family_line = (
-            "Family: traditional Chinese ink-wash on one warm Xuan-paper tone; "
-            "soft bleeding edges; ink density may vary by slot but hue/paper must match siblings. "
+            "Family: traditional Chinese ink-wash on one shared paper tone; "
+            "soft bleeding edges; ink density may vary by slot but hue/paper must match siblings "
+            "and the template color key above. "
         )
     elif family == "wash":
         family_line = (
-            "Family: abstract atmospheric wash / fine paper texture; "
-            "seamless soft transitions; no hard geometric crop boxes inside the artwork. "
+            "Family: abstract atmospheric wash / fine texture; "
+            "seamless soft transitions; no hard geometric crop boxes inside the artwork; "
+            "wash value/temperature must match the template color key. "
         )
     elif family == "photo":
         family_line = (
             "Family: cinematic editorial photography; "
-            "same white-balance, contrast curve, and material light as sibling assets. "
+            "same white-balance, contrast curve, and material light as sibling assets; "
+            "grading must match the template color key. "
         )
     else:
         family_line = (
             "Family: refined editorial illustration; "
-            "same line weight, fill language, and paper field as sibling assets. "
+            "same line weight, fill language, and field tone as sibling assets; "
+            "ground tone must match the template color key. "
         )
 
     style_bit = f"Deck style intent: {style}. " if style else ""
@@ -720,6 +997,7 @@ def build_image_prompt(
     bg_hex: str | None = None,
     material_lock: str | None = None,
     aspect: str | None = None,
+    palette_brief: str = "",
 ) -> str:
     stem = Path(filename).stem.replace("-", " ").replace("_", " ")
     subject = alt.strip() or stem
@@ -733,6 +1011,7 @@ def build_image_prompt(
             style_hint=style,
             bg_hex=bg,
             alts=[subject],
+            palette_brief=palette_brief,
         )
     slot = _slot_role_hint(filename, subject)
     frame = (
@@ -813,28 +1092,32 @@ def build_image_prompt(
         for k in ("cover", "hero", "section", "chapter", "closing", "title", "wash")
     )
 
+    tone = _palette_match_clause(bg=bg, surface=bg, palette_brief=palette_brief)
     if is_wash or (force_hero and "wash" in stem_l):
         body = (
-            f"{frame}{anti_matte}Full-bleed abstract atmospheric wash or fine paper texture. "
+            f"{frame}{anti_matte}Full-bleed abstract atmospheric wash or fine texture. "
             "Soft subtle color transition (gradient-like), seamless edge-to-edge, "
             "no text, no logos, no watermark, no UI chrome, no hard shapes, no icons. "
-            f"Harmonize with slide color {bg}. "
+            f"Harmonize with slide color {bg}. {tone}"
             f"{slot}Subject intent: {subject}."
         )
     elif is_cinematic or force_hero:
         body = (
-            f"{frame}{anti_matte}Cinematic full-bleed photograph. "
+            f"{frame}{anti_matte}Cinematic full-bleed photograph or editorial visual. "
             "No text, no logos, no watermark, no UI chrome, no frame, no white border, no collage. "
             "Atmospheric lighting, shallow depth of field, moody editorial photography. "
             "Premium magazine cover quality, rich material and light. "
+            f"Overall grade MUST harmonize with slide color {bg} and the template color key. "
+            f"{tone}"
             f"{slot}Subject: {subject}."
         )
     elif is_watercolor:
         body = (
             f"{frame}{anti_matte}Presentation illustration. "
             "No text, no logos, no watermark, no UI chrome. "
-            "Warm watercolor / ink-wash paper texture or refined editorial illustration, "
-            "not cute stickers; match sibling assets exactly in paper and ink temperature. "
+            "Watercolor / ink-wash or refined editorial illustration, "
+            "not cute stickers; match sibling assets exactly in field and ink temperature. "
+            f"Harmonize with slide color {bg}. {tone}"
             f"{slot}Subject: {subject}."
         )
     else:
@@ -844,6 +1127,7 @@ def build_image_prompt(
             f"Background must be a seamless flat/near-flat field matching slide color {bg} "
             f"(exact same hue/value if possible), so the asset can sit on a {bg} slide without a visible rectangle. "
             "Subject floats softly with gentle falloff into that background; avoid hard cropped box edges. "
+            f"{tone}"
             f"{slot}Subject: {subject}."
         )
 
@@ -1308,6 +1592,7 @@ def materialize_images(
     style_hint: str = "",
     bg_hex: str | None = None,
     theme_colors: dict[str, str] | None = None,
+    palette_brief: str = "",
     concurrency: int | None = None,
     force: bool = False,
     prompt_mode: str = "deck",
@@ -1379,11 +1664,15 @@ def materialize_images(
 
     # 整包一次材质锁定：同套纸色/温度/颗粒，槽位只改职责
     all_prompts = [image_ref_prompt(v) for v in refs.values()]
+    color_brief = (palette_brief or "").strip() or extract_image_color_brief(
+        style_hint
+    )
     material_lock = build_shared_material_lock(
         style_hint=style_hint,
         bg_hex=bg_hex,
         alts=[image_ref_prompt(v) for _, v in pending] + all_prompts,
         theme_colors=theme_colors,
+        palette_brief=color_brief,
     )
 
     # 闭包捕获 ImageClientPool；勿与下方 ThreadPoolExecutor 同名，否则运行时
@@ -1443,6 +1732,7 @@ def materialize_images(
                     bg_hex=bg_hex,
                     material_lock=material_lock,
                     aspect=size,
+                    palette_brief=color_brief,
                 )
             )
 

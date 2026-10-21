@@ -118,7 +118,7 @@ export const PanelItemSelect: FC<PanelItemSelectProps> = ({
               hoveredValue === item.type ? `animate__${item.type}` : ""
             } ${hoveredValue === item.type ? "opacity-100" : "opacity-0"}`}
           >
-            Web PPT
+            AI Prept
           </div>
         )}
       </div>

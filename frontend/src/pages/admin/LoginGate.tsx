@@ -43,7 +43,7 @@ export function LoginGate({ onOk }: { onOk: () => void }) {
       </div>
       <Card className="w-full max-w-md shadow-sm">
         <CardHeader>
-          <CardTitle className="text-xl">WebPPT 模板后台</CardTitle>
+          <CardTitle className="text-xl">AI Prept 模板后台</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="mb-4 text-sm text-muted-foreground">

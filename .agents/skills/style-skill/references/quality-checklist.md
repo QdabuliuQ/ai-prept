@@ -25,7 +25,7 @@ Mark each item. Any fail → revise before shipping.
 - [ ] Composition list is not a copy of the parent or sibling
 - [ ] Optional Hard bans prevent collapse into dark-tech HUD / 三栏白卡 when relevant
 
-## WebPPT / SVG fitness
+## AI Prept / SVG fitness
 
 - [ ] Guidance is SVG-native (shapes, rules, opacity, patterns) — no CSS frameworks
 - [ ] Does not forbid carriers wholesale; only treats their look

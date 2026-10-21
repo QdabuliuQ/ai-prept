@@ -26,7 +26,7 @@ def extract_token(
     auth = (authorization or request.headers.get("authorization") or "").strip()
     if auth.lower().startswith("bearer "):
         return auth[7:].strip()
-    cookie = request.cookies.get("webppt_admin_token") or ""
+    cookie = request.cookies.get("ai_prept_admin_token") or ""
     return cookie.strip()
 
 

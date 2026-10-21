@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Convert a PPTX file → WebPPT html-slide template package via @aiden0z/pptx-renderer.
+ * Convert a PPTX file → AI Prept html-slide template package via @aiden0z/pptx-renderer.
  * Used by the PPT Master pipeline (SVG → PPTX → template pack). Not a drafts drop-in tool.
  *
  * Usage:
@@ -337,7 +337,7 @@ function writeHarness(tmpDir, rendererRelUrl) {
         }
       });
 
-      // Mirror data-rotate onto nested <img> for WebPPT / export parsers that start at the media node.
+      // Mirror data-rotate onto nested <img> for AI Prept / export parsers that start at the media node.
       root.querySelectorAll("img").forEach((img) => {
         if (img.getAttribute("data-rotate")) return;
         let host = img.parentElement;

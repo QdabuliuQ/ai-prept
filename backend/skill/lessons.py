@@ -34,7 +34,7 @@ _FALLBACK_RULES: dict[str, str] = {
     "cover": "封面主视觉全出血；品牌/主标题层级清晰，勿堆次要营销块。",
 }
 
-_SYSTEM = """你是 WebPPT 质检教训编辑。把本次硬失败整理成可迁移、可执行的短规则，供下次 Plan/Slide 生成避免重犯。
+_SYSTEM = """你是 AI Prept 质检教训编辑。把本次硬失败整理成可迁移、可执行的短规则，供下次 Plan/Slide 生成避免重犯。
 只输出 JSON object：{"lessons":[{"id":"kebab-case","track":"both"|"html-slide","rule":"一句话规则"}]}。
 约束：
 - id 小写 kebab-case，稳定（同类问题同 id），长度 ≤40

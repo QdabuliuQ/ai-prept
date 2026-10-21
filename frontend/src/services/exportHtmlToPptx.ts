@@ -1,4 +1,4 @@
-import { exportPPTX, generatePPTX } from "@webppt/html-to-pptx";
+import { exportPPTX, generatePPTX } from "@ai-prept/html-to-pptx";
 import type { Page } from "@/store/zustand/pptStore";
 import { pageHasHtml } from "@/utils/pptx/prepareHtmlExport";
 
@@ -49,7 +49,7 @@ export function makeTemplateAssetResolver(assetBaseUrl: string) {
 }
 
 /**
- * Export HTML pages via @webppt/html-to-pptx (html-slide pipeline).
+ * Export HTML pages via @ai-prept/html-to-pptx (html-slide pipeline).
  */
 export async function downloadHtmlToPptx(options: {
   name?: string;

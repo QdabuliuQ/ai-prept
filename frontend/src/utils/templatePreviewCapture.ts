@@ -229,7 +229,7 @@ function markImageUnderlayRects(svg: SVGSVGElement, vbW: number, vbH: number) {
       if (!(pos & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
       const rectBox = readSvgBox(rect);
       if (coverRatio(rectBox, imgBox) >= 0.55) {
-        rect.setAttribute("data-webppt-capture-underlay", "1");
+        rect.setAttribute("data-ai-prept-capture-underlay", "1");
       }
     }
   }
@@ -305,8 +305,8 @@ async function rasterizeSvgElement(
     clone = svg.cloneNode(true) as SVGSVGElement;
   } finally {
     svg
-      .querySelectorAll("[data-webppt-capture-underlay]")
-      .forEach((el) => el.removeAttribute("data-webppt-capture-underlay"));
+      .querySelectorAll("[data-ai-prept-capture-underlay]")
+      .forEach((el) => el.removeAttribute("data-ai-prept-capture-underlay"));
   }
   if (!clone.getAttribute("xmlns")) {
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
@@ -314,7 +314,7 @@ async function rasterizeSvgElement(
   clone.setAttribute("xmlns:xlink", XLINK_NS);
   clone.querySelectorAll("image").forEach((el) => el.remove());
   clone
-    .querySelectorAll("[data-webppt-capture-underlay]")
+    .querySelectorAll("[data-ai-prept-capture-underlay]")
     .forEach((el) => el.remove());
   // 全幅底 rect 已在 canvas 填过，去掉以免盖住配图
   clone

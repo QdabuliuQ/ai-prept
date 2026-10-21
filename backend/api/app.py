@@ -30,7 +30,7 @@ async def lifespan(_app: FastAPI):
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="WebPPT API", lifespan=lifespan)
+    app = FastAPI(title="AI Prept API", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[

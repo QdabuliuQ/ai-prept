@@ -162,7 +162,7 @@ class GenerationUsage:
 
 
 _CURRENT: ContextVar[GenerationUsage | None] = ContextVar(
-    "webppt_generation_usage", default=None
+    "ai_prept_generation_usage", default=None
 )
 
 

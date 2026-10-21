@@ -10,8 +10,9 @@ from typing import Any, Callable
 
 from config import is_mock, load_env
 from image.generate import (
-    extract_theme_colors,
+    extract_image_color_brief,
     materialize_images,
+    resolve_image_theme_colors,
     write_image_bytes,
 )
 from templates.page_rewrite import _load_meta, _resolve_slide_file, list_image_files
@@ -148,14 +149,22 @@ def run_page_image_regen(
         theme_path = package_dir / "theme.css"
         if theme_path.is_file():
             theme_css = theme_path.read_text(encoding="utf-8")
-        theme_colors = extract_theme_colors(theme_css)
-        label = ""
-        lab = meta.get("label")
-        if isinstance(lab, dict):
-            label = str(lab.get("zh_CN") or lab.get("en_US") or "").strip()
-        label = label or str(meta.get("template_id") or package_dir.name)
-        # Keep deck title only as weak mood; subject prompt_mode ignores heavy locks.
-        style_hint = f"{label} {meta.get('visual_style') or ''}".strip()
+        visual_spec = ""
+        spec_path = package_dir / "visual-spec.md"
+        if spec_path.is_file():
+            visual_spec = spec_path.read_text(encoding="utf-8")
+        theme_colors = resolve_image_theme_colors(
+            theme_css,
+            visual_spec,
+            package_dir=package_dir,
+        )
+        # Prefer design language over content title for color key.
+        style_hint = " ".join(
+            [
+                str(meta.get("visual_style") or "").strip(),
+                extract_image_color_brief(visual_spec)[:300],
+            ]
+        ).strip()
         with track_usage() as usage:
             warnings = materialize_images(
                 package_dir / "images",
@@ -163,6 +172,7 @@ def run_page_image_regen(
                 style_hint=style_hint,
                 bg_hex=theme_colors.get("bg"),
                 theme_colors=theme_colors,
+                palette_brief=extract_image_color_brief(visual_spec),
                 force=True,
                 prompt_mode="subject",
             )

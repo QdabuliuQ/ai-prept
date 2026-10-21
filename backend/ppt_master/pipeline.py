@@ -1439,7 +1439,7 @@ def _build_plan(
                     else:
                         raise
                 return seed, force_plan_style(candidate, visual_style), None
-            except RuntimeError as exc:
+            except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
                 return seed, None, str(exc)
 
     # Candidate plans are independent. Keep a small cap to reduce wall time
@@ -1519,21 +1519,21 @@ def _build_plan(
         if "template_id/label_zh" not in item
     ]
     if rewrite_critique:
-        revised = chat_json(
-            pool=pool,
-            model=cfg.model,
-            system=prompts.SYSTEM_PLAN,
-            user=prompts.user_plan_rewrite(
-                prompt=prompt,
-                page_count=pages,
-                visual_style=visual_style,
-                plan=plan,
-                critique="；".join(rewrite_critique),
-                enable_images=enable_images,
-            ),
-            temperature=0.6,
-        )
         try:
+            revised = chat_json(
+                pool=pool,
+                model=cfg.model,
+                system=prompts.SYSTEM_PLAN,
+                user=prompts.user_plan_rewrite(
+                    prompt=prompt,
+                    page_count=pages,
+                    visual_style=visual_style,
+                    plan=plan,
+                    critique="；".join(rewrite_critique),
+                    enable_images=enable_images,
+                ),
+                temperature=0.6,
+            )
             _validate_plan(revised, pages)
             revised = force_plan_style(revised, visual_style)
             if _creative_score(
@@ -1543,8 +1543,9 @@ def _build_plan(
                 critique = _plan_critique(
                     plan, prompt=prompt, visual_style=visual_style
                 )
-        except RuntimeError as exc:
-            _log(log, f"[plan] rewrite rejected: {exc}")
+        except (RuntimeError, ValueError, json.JSONDecodeError) as exc:
+            # Free-tier models often break rewrite JSON; keep the winning candidate.
+            _log(log, f"[plan] rewrite skipped (keep candidate): {exc}")
     plan = force_plan_style(plan, visual_style)
     # Deterministic scrub even if rewrite kept a style-flavored title
     for key in ("label_zh", "template_id"):
@@ -1572,7 +1573,7 @@ def _init_project(name: str, log: LogFn | None) -> Path:
     projects.mkdir(parents=True, exist_ok=True)
     # project_manager only appends _YYYYMMDD; same-day re-runs collide unless the
     # base name is unique per job.
-    base = re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-")[:28] or "webppt"
+    base = re.sub(r"[^a-zA-Z0-9_-]+", "-", name).strip("-")[:28] or "ai-prept"
     uniq = datetime.now().strftime("%H%M%S") + secrets.token_hex(2)
     init_name = f"{base}-{uniq}"
     before = {p.name for p in projects.iterdir() if p.is_dir()} if projects.is_dir() else set()
@@ -1713,8 +1714,8 @@ def _export_pptx(
 
 
 def _html_convert_mode() -> str:
-    """Default browser-side PPTX→HTML; set WEBPPT_HTML_CONVERT=puppeteer for legacy Node path."""
-    raw = os.environ.get("WEBPPT_HTML_CONVERT", "browser").strip().lower()
+    """Default browser-side PPTX→HTML; set AI_PREPT_HTML_CONVERT=puppeteer for legacy Node path."""
+    raw = os.environ.get("AI_PREPT_HTML_CONVERT", "browser").strip().lower()
     if raw in {"puppeteer", "node", "server"}:
         return "puppeteer"
     return "browser"
@@ -2171,7 +2172,7 @@ def run_one_package(
         plan["public_id"] = tid
         palette = plan.get("palette") if isinstance(plan.get("palette"), dict) else {}
 
-        project = _init_project(f"webppt-{tid}"[:40], log)
+        project = _init_project(f"ai-prept-{tid}"[:40], log)
         svg_dir = project / "svg_output"
         svg_dir.mkdir(parents=True, exist_ok=True)
         images_dir = project / "images"

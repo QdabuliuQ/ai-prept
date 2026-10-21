@@ -104,7 +104,7 @@ export function stripMiscDataAttrs(html) {
     (full, name) => {
       const key = `data-${name}`.toLowerCase();
       if (KEEP_DATA_ATTRS.has(key)) return full;
-      // keep data-slot* prefix variants + data-rotate (WebPPT preview/export)
+      // keep data-slot* prefix variants + data-rotate (AI Prept preview/export)
       if (key.startsWith("data-slot") || key === "data-rotate") return full;
       removed += 1;
       return "";

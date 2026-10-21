@@ -46,7 +46,7 @@ async function waitForFonts(doc: Document, timeoutMs = 8000) {
 /** 固定导出帧，避免动画、光标和异步字体造成截图漂移。 */
 function freezeForExport(doc: Document) {
   const style = doc.createElement("style");
-  style.setAttribute("data-webppt-export-freeze", "true");
+  style.setAttribute("data-ai-prept-export-freeze", "true");
   style.textContent = `
     *, *::before, *::after {
       animation: none !important;
@@ -75,7 +75,7 @@ function bodyVisibleText(doc: Document): string {
 function readEmbedFailure(doc: Document): string | null {
   const body = doc.body;
   if (!body) return null;
-  if (body.getAttribute("data-webppt-embed-error") === "1") {
+  if (body.getAttribute("data-ai-prept-embed-error") === "1") {
     return bodyVisibleText(doc) || "幻灯片 embed 失败";
   }
   // 兼容旧壳：无 script、短文案且命中固定失败句
@@ -93,7 +93,7 @@ function readEmbedFailure(doc: Document): string | null {
 
 function isEmbedBootShell(doc: Document): boolean {
   // /embed/slide 初始壳：尚未 document.write 幻灯片
-  if (doc.body?.getAttribute("data-webppt-embed-error") === "1") return false;
+  if (doc.body?.getAttribute("data-ai-prept-embed-error") === "1") return false;
   const hasBootScript =
     !!doc.querySelector("script") &&
     !doc.querySelector(".slide-container, .slide");

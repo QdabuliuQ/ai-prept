@@ -1,5 +1,5 @@
 {
-  "name": "@webppt/html-to-pptx",
+  "name": "@ai-prept/html-to-pptx",
   "version": "0.1.0",
   "private": true,
   "description": "From-scratch HTML slide → editable PPTX (pptxgenjs)",

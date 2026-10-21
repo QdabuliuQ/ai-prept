@@ -1,1 +1,1 @@
-"""WebPPT FastAPI package (gallery + admin)."""
+"""AI Prept FastAPI package (gallery + admin)."""

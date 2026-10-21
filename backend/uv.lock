@@ -1604,7 +1604,7 @@ wheels = [
 ]
 
 [[package]]
-name = "webppt-backend"
+name = "ai-prept-backend"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [

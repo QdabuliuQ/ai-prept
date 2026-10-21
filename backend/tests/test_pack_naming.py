@@ -64,7 +64,7 @@ def test_resolve_drops_style_metaphor() -> None:
         label_zh="舞台灯光AI产品发布会",
         template_id="",
         prompt="虚构 AI 产品发布会：冲击力封面",
-        out_root=Path("/tmp/webppt-pack-naming-test"),
+        out_root=Path("/tmp/ai-prept-pack-naming-test"),
         visual_style="concert-stage",
     )
     assert "舞台灯光" not in name

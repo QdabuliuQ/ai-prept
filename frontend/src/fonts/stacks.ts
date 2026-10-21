@@ -24,11 +24,11 @@ export function buildSharedFontCss(): string {
   return `
 @import url('${WEB_FONT_STYLESHEET_HREF}');
 :root {
-  --webppt-font-serif: ${FONT_STACK_SERIF};
-  --webppt-font-sans: ${FONT_STACK_SANS};
+  --ai-prept-font-serif: ${FONT_STACK_SERIF};
+  --ai-prept-font-sans: ${FONT_STACK_SANS};
 }
 html, body {
-  font-family: var(--webppt-font-sans);
+  font-family: var(--ai-prept-font-sans);
 }
 `.trim();
 }

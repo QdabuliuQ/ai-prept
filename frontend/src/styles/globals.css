@@ -11,9 +11,9 @@
 /* CSS 变量定义 */
 :root {
   /* 与 src/fonts/stacks.ts / 测量 HTML 对齐 */
-  --webppt-font-serif: "Source Han Serif SC", "Noto Serif SC", "Songti SC",
+  --ai-prept-font-serif: "Source Han Serif SC", "Noto Serif SC", "Songti SC",
     "STSong", serif;
-  --webppt-font-sans: "PingFang SC", "Noto Sans SC", "Hiragino Sans GB",
+  --ai-prept-font-sans: "PingFang SC", "Noto Sans SC", "Hiragino Sans GB",
     "Microsoft YaHei", sans-serif;
 
   /* 主题色 */
@@ -223,7 +223,7 @@ html.dark {
 
 body {
   font-family: var(
-    --webppt-font-sans,
+    --ai-prept-font-sans,
     "PingFang SC",
     "Noto Sans SC",
     "Hiragino Sans GB",

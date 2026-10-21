@@ -79,7 +79,7 @@ def _inject_align(html: str) -> str:
     if "data-element" not in html:
         return html
     snippet = """
-<style id="webppt-data-element-preview-align">
+<style id="ai-prept-data-element-preview-align">
 [data-element="text"][data-valign="middle"]{display:flex!important;flex-direction:column!important;justify-content:center!important}
 [data-element="text"][data-valign="bottom"]{display:flex!important;flex-direction:column!important;justify-content:flex-end!important}
 </style>
@@ -251,11 +251,11 @@ SLIDE_EMBED_HTML = """<!DOCTYPE html>
     document.body.style.cssText = "margin:0;padding:24px;font-family:system-ui,sans-serif;color:#b91c1c";
   }
   function injectEditorRuntime() {
-    if (document.querySelector('script[data-webppt-slide-editor]')) return;
+    if (document.querySelector('script[data-ai-prept-slide-editor]')) return;
     var s = document.createElement("script");
     s.src = "/slide-editor/runtime.js";
     s.defer = true;
-    s.setAttribute("data-webppt-slide-editor", "1");
+    s.setAttribute("data-ai-prept-slide-editor", "1");
     document.head.appendChild(s);
   }
   try {
@@ -264,13 +264,13 @@ SLIDE_EMBED_HTML = """<!DOCTYPE html>
       return;
     }
     var html = null;
-    if (typeof window.parent.__webpptGetSlideHtml === "function") {
-      html = window.parent.__webpptGetSlideHtml(pageId, token);
+    if (typeof window.parent.__ai_preptGetSlideHtml === "function") {
+      html = window.parent.__ai_preptGetSlideHtml(pageId, token);
     } else if (
-      window.parent.__WEBPPT_SLIDE_BRIDGE__ &&
-      typeof window.parent.__WEBPPT_SLIDE_BRIDGE__.getPageHtml === "function"
+      window.parent.__AI_PREPT_SLIDE_BRIDGE__ &&
+      typeof window.parent.__AI_PREPT_SLIDE_BRIDGE__.getPageHtml === "function"
     ) {
-      html = window.parent.__WEBPPT_SLIDE_BRIDGE__.getPageHtml(pageId, token);
+      html = window.parent.__AI_PREPT_SLIDE_BRIDGE__.getPageHtml(pageId, token);
     }
     if (!html) {
       fail("Missing slide HTML");

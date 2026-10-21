@@ -4,7 +4,7 @@
 Usage (from backend/):
   python scripts/build-visual-style-catalog.py
   # or
-  webppt-backend styles-catalog
+  ai-prept-backend styles-catalog
 """
 
 from __future__ import annotations

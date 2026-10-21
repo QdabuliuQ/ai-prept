@@ -1,5 +1,5 @@
 /**
- * Admin template generation jobs — spawn webppt-backend CLI.
+ * Admin template generation jobs — spawn ai-prept-backend CLI.
  * (compat layer for pptStore — page HTML only)
  */
 

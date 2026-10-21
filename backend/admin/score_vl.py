@@ -32,6 +32,7 @@ def resolve_score_vl() -> dict[str, str]:
 
 
 def _chat(system: str, user: str, *, temperature: float = 1.2, max_tokens: int = 220) -> dict[str, str]:
+    """Legacy SCORE_VL (DashScope) path — prefer `_chat_selected_llm` for Admin UI."""
     cfg = resolve_score_vl()
     url = f"{cfg['baseUrl']}/chat/completions"
     with httpx.Client(timeout=60.0) as client:
@@ -63,6 +64,54 @@ def _chat(system: str, user: str, *, temperature: float = 1.2, max_tokens: int =
             text = text[4:].strip()
     text = text.strip().strip('"「『」』')
     return {"text": text, "model": cfg["model"]}
+
+
+def _chat_selected_llm(
+    system: str,
+    user: str,
+    *,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+    temperature: float = 1.2,
+    max_tokens: int = 220,
+) -> dict[str, str]:
+    """Use the same Admin-selected LLM as PPT Master (not DashScope SCORE_VL)."""
+    from admin.providers import resolve_llm_selection
+    from config import LlmConfig
+    from llm import chat_text, make_client_pool
+
+    sel = resolve_llm_selection(llm_provider, llm_model)
+    keys = tuple(sel.get("keys") or ())
+    if not keys:
+        raise RuntimeError(
+            f"未配置所选语言模型的 API Key（{sel.get('provider') or llm_provider}）。"
+            "请在 .env.local 配置对应 Key，或换一个已配置的模型。"
+        )
+    cfg = LlmConfig(
+        api_keys=keys,
+        base_url=str(sel["baseUrl"]).rstrip("/"),
+        model=str(sel["model"]),
+        timeout_s=60.0,
+    )
+    pool = make_client_pool(cfg)
+    text = (chat_text(
+        pool=pool,
+        model=cfg.model,
+        system=system,
+        user=user,
+        temperature=temperature,
+    ) or "").strip()
+    if text.startswith("```"):
+        text = text.replace("```", "").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    text = text.strip().strip('"「『」』')
+    _ = max_tokens  # backends differ; prompts already ask for short answers
+    return {
+        "text": text,
+        "model": cfg.model,
+        "provider": str(sel.get("provider") or ""),
+    }
 
 
 # 本地抽签拉开领域，避免模型反复落到「智慧城市 / 智能交通」默认套路
@@ -196,7 +245,13 @@ _INSPIRE_DOMAINS: tuple[str, ...] = (
 )
 
 
-def generate_random_theme_prompt(*, visual_style: str = "") -> dict[str, str]:
+def generate_random_theme_prompt(
+    *,
+    visual_style: str = "",
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+) -> dict[str, str]:
+    """Admin 随机主题：与下方所选主力 LLM 相同。"""
     salt = f"{int(time.time() * 1000):x}-{random.randrange(1 << 24):x}"
     domain = random.choice(_THEME_DOMAINS)
     angle = random.choice(_THEME_ANGLES)
@@ -219,12 +274,55 @@ def generate_random_theme_prompt(*, visual_style: str = "") -> dict[str, str]:
     if visual_style.strip():
         user += f"当前选用视觉风格 id（仅供语气参考，勿写入主题文案）：{visual_style.strip()}\n"
     user += "请按上述领域与场合发明一个具体的 PPT 主题描述。"
-    out = _chat(system, user, temperature=1.35)
-    return {"prompt": out["text"], "model": out["model"]}
+    out = _chat_selected_llm(
+        system,
+        user,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        temperature=1.35,
+        max_tokens=220,
+    )
+    return {
+        "prompt": out["text"],
+        "model": out["model"],
+        "provider": out.get("provider") or "",
+    }
 
 
-def generate_inspire_brief() -> dict[str, str]:
-    """Homepage「发现灵感」：一段可直接当 PPT 创作要求的中文简述（与模板无关）。"""
+def _strip_inspire_text(raw: str) -> str:
+    text = (raw or "").strip()
+    if text.startswith("```"):
+        text = text.replace("```", "").strip()
+        if text.lower().startswith("json"):
+            text = text[4:].strip()
+    return text.strip().strip('"「『」』')
+
+
+def generate_inspire_brief(
+    *,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+) -> dict[str, str]:
+    """Homepage「发现灵感」：用首页选中的语言模型生成创作要求。"""
+    from admin.providers import resolve_llm_selection
+    from config import LlmConfig
+    from llm import chat_text, make_client_pool
+
+    sel = resolve_llm_selection(llm_provider, llm_model)
+    keys = tuple(sel.get("keys") or ())
+    if not keys:
+        raise RuntimeError(
+            f"未配置所选语言模型的 API Key（{sel.get('provider') or llm_provider}）。"
+            "请在 .env.local 配置对应 Key，或换一个已配置的模型。"
+        )
+    cfg = LlmConfig(
+        api_keys=keys,
+        base_url=str(sel["baseUrl"]).rstrip("/"),
+        model=str(sel["model"]),
+        timeout_s=60.0,
+    )
+    pool = make_client_pool(cfg)
+
     salt = f"{int(time.time() * 1000):x}-{random.randrange(1 << 24):x}"
     domain = random.choice(_INSPIRE_DOMAINS)
     system = (
@@ -244,11 +342,30 @@ def generate_inspire_brief() -> dict[str, str]:
         f"领域：{domain}\n"
         "请写出一段可直接使用的 PPT 创作要求。"
     )
-    out = _chat(system, user, temperature=1.3, max_tokens=280)
-    return {"prompt": out["text"], "model": out["model"]}
+    text = _strip_inspire_text(
+        chat_text(
+            pool=pool,
+            model=cfg.model,
+            system=system,
+            user=user,
+            temperature=1.3,
+        )
+    )
+    if not text:
+        raise RuntimeError("灵感模型未返回有效文案，请重试或更换模型")
+    return {
+        "prompt": text,
+        "model": cfg.model,
+        "provider": str(sel.get("provider") or ""),
+    }
 
 
-def generate_random_style_intent() -> dict[str, Any]:
+def generate_random_style_intent(
+    *,
+    llm_provider: str | None = None,
+    llm_model: str | None = None,
+) -> dict[str, Any]:
+    """Admin 随机风格 invent：与下方所选主力 LLM 相同。"""
     salt = f"{int(time.time() * 1000):x}-{random.randrange(1 << 24):x}"
     # 压低「纸感暖奶油」先验；多数抽冷浅 / 深色 / 高饱和
     field_axes = (
@@ -272,11 +389,19 @@ def generate_random_style_intent() -> dict[str, Any]:
         f"底色轴：{field}\n"
         "请发明一个适合网页 PPT 的视觉风格意图。"
     )
-    out = _chat(system, user, temperature=1.25, max_tokens=180)
+    out = _chat_selected_llm(
+        system,
+        user,
+        llm_provider=llm_provider,
+        llm_model=llm_model,
+        temperature=1.25,
+        max_tokens=180,
+    )
     return {
         "mode": "invent",
         "styleIntent": out["text"],
         "model": out["model"],
+        "provider": out.get("provider") or "",
         "ensureStyle": True,
         "fieldAxis": field,
     }

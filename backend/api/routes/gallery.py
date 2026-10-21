@@ -41,11 +41,32 @@ def get_gallery_models():
 
 @router.post("/api/gallery/inspire")
 async def post_inspire(request: Request):
-    """首页「发现灵感」：LLM 生成一段 PPT 创作要求（与所选模板无关）。"""
+    """首页「发现灵感」：用当前选中的语言模型生成 PPT 创作要求。"""
+    from admin.providers import list_gallery_model_catalog
     from admin.score_vl import generate_inspire_brief
 
     try:
-        return generate_inspire_brief()
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+
+    catalog = list_gallery_model_catalog()
+    defaults = catalog.get("defaults") or {}
+    llm_provider = (
+        str(body.get("llmProvider") or defaults.get("llmProvider") or "gemini").strip()
+        or "gemini"
+    )
+    llm_model = (
+        str(body.get("llmModel") or defaults.get("llmModel") or "gemini-3.8-flash").strip()
+        or "gemini-3.8-flash"
+    )
+    try:
+        return generate_inspire_brief(
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+        )
     except Exception as e:  # noqa: BLE001
         return err(502, error=str(e))
 

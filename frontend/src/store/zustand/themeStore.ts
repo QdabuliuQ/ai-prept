@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 export type ThemeMode = "light" | "dark";
 
-const STORAGE_KEY = "webppt-theme";
+const STORAGE_KEY = "ai-prept-theme";
 
 function readStoredTheme(): ThemeMode {
   if (typeof window === "undefined") return "light";

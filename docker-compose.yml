@@ -1,27 +1,27 @@
-# Local Postgres for WebPPT gallery / admin catalog.
+# Local Postgres for AI Prept gallery / admin catalog.
 # Usage:
 #   open -a Docker   # if daemon not running
 #   docker compose up -d
-#   cd backend && .venv/bin/webppt-backend gallery-sync
+#   cd backend && .venv/bin/ai-prept-backend gallery-sync
 
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: webppt-postgres
+    container_name: ai-prept-postgres
     restart: unless-stopped
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_USER: webppt
-      POSTGRES_PASSWORD: webppt
-      POSTGRES_DB: webppt
+      POSTGRES_USER: ai-prept
+      POSTGRES_PASSWORD: ai-prept
+      POSTGRES_DB: ai-prept
     volumes:
-      - webppt_pgdata:/var/lib/postgresql/data
+      - ai_prept_pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U webppt -d webppt"]
+      test: ["CMD-SHELL", "pg_isready -U ai-prept -d ai-prept"]
       interval: 5s
       timeout: 5s
       retries: 10
 
 volumes:
-  webppt_pgdata:
+  ai_prept_pgdata:

@@ -32,7 +32,7 @@ _TITLE_SLOT_RE = re.compile(
 _SPAN_PLAIN_RE = re.compile(r"<span\b[^>]*>(.*?)</span>", re.I | re.S)
 _TAG_RE = re.compile(r"<[^>]+>")
 
-SYSTEM_PAGE_REWRITE = """你是 WebPPT HTML 幻灯片作者。只输出完整 HTML 文档（可含 <!DOCTYPE>），不要 markdown 围栏，不要解释。
+SYSTEM_PAGE_REWRITE = """你是 AI Prept HTML 幻灯片作者。只输出完整 HTML 文档（可含 <!DOCTYPE>），不要 markdown 围栏，不要解释。
 
 硬规则：
 1. 画布：根内容容器必须是 1920×1080（class 含 pptx-slide-root 或 slide-container），position:relative，overflow:hidden

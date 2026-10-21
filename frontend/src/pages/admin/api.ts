@@ -1,4 +1,4 @@
-const TOKEN_KEY = "webppt_admin_token";
+const TOKEN_KEY = "ai_prept_admin_token";
 const TOKEN_HEADER = "x-admin-token";
 
 export function readToken(): string {
@@ -8,12 +8,12 @@ export function readToken(): string {
 
 export function writeToken(token: string) {
   localStorage.setItem(TOKEN_KEY, token);
-  document.cookie = `webppt_admin_token=${encodeURIComponent(token)}; path=/; SameSite=Lax`;
+  document.cookie = `ai_prept_admin_token=${encodeURIComponent(token)}; path=/; SameSite=Lax`;
 }
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
-  document.cookie = "webppt_admin_token=; path=/; Max-Age=0; SameSite=Lax";
+  document.cookie = "ai_prept_admin_token=; path=/; Max-Age=0; SameSite=Lax";
 }
 
 export async function adminFetch(url: string, init: RequestInit = {}) {

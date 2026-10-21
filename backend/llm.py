@@ -513,6 +513,70 @@ def _normalize_chat_messages(
     ]
 
 
+def _strip_code_fence(content: str) -> str:
+    text = (content or "").strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.I)
+        text = re.sub(r"\s*```$", "", text)
+    return text.strip()
+
+
+def _extract_json_object_text(content: str) -> str:
+    """Best-effort: fence strip + outermost `{...}` for messy free-tier output."""
+    text = _strip_code_fence(content)
+    if not text:
+        return "{}"
+    if text[0] == "{":
+        return text
+    start = text.find("{")
+    end = text.rfind("}")
+    if start >= 0 and end > start:
+        return text[start : end + 1]
+    return text
+
+
+def _loads_json_object(content: str) -> dict[str, Any]:
+    """Parse a JSON object; tolerate fences, prose wrapping, trailing commas."""
+    raw = _extract_json_object_text(content)
+    candidates = [raw]
+    # Trailing commas before } or ] — common with flash models.
+    fixed = re.sub(r",\s*([}\]])", r"\1", raw)
+    if fixed != raw:
+        candidates.append(fixed)
+    # Smart / CJK quotes → ASCII (only outside already-valid parse path).
+    quoted = (
+        raw.replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("「", '"')
+        .replace("」", '"')
+    )
+    if quoted != raw:
+        candidates.append(quoted)
+        candidates.append(re.sub(r",\s*([}\]])", r"\1", quoted))
+
+    last_err: BaseException | None = None
+    for cand in candidates:
+        try:
+            data = json.loads(cand or "{}")
+        except json.JSONDecodeError as exc:
+            last_err = exc
+            continue
+        if isinstance(data, dict):
+            return data
+        last_err = ValueError("LLM 返回的 JSON 不是 object")
+    if last_err is not None:
+        raise last_err
+    raise ValueError("LLM 返回的 JSON 不是 object")
+
+
+_JSON_RETRY_HINT = (
+    "上一次输出不是合法 JSON。请只输出一个 JSON 对象，"
+    "不要 Markdown 代码块，不要解释文字；字符串内引号必须转义。"
+)
+
+
 def chat_json(
     client: OpenAI | None = None,
     *,
@@ -523,9 +587,16 @@ def chat_json(
     temperature: float = 0.4,
     pool: LlmClientPool | None = None,
 ) -> dict[str, Any]:
-    """Ask model for a single JSON object (compatible with DeepSeek / OpenAI)."""
+    """Ask model for a single JSON object (compatible with DeepSeek / OpenAI).
+
+    Free / weak models often return fences or lightly broken JSON; we extract,
+    lightly repair, and retry once with a strict nudge before failing.
+    """
     messages = _normalize_chat_messages(system=system, user=user, messages=messages)
     cfg = pool.cfg if pool is not None else None
+
+    def _parse_or_raise(content: str) -> dict[str, Any]:
+        return _loads_json_object(content)
 
     if cfg is not None and _is_workers_ai_run(cfg):
         content = _run_workers_ai(
@@ -536,35 +607,58 @@ def chat_json(
             messages=messages,
             temperature=temperature,
         )
-        if content.startswith("```"):
-            content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.I)
-            content = re.sub(r"\s*```$", "", content)
-        data = json.loads(content.strip() or "{}")
-        if not isinstance(data, dict):
-            raise ValueError("LLM 返回的 JSON 不是 object")
-        return data
+        try:
+            return _parse_or_raise(content)
+        except (json.JSONDecodeError, ValueError):
+            repair_msgs = list(messages) + [
+                {"role": "assistant", "content": content[:4000]},
+                {"role": "user", "content": _JSON_RETRY_HINT},
+            ]
+            content2 = _run_workers_ai(
+                pool=pool,
+                client=client,
+                cfg=cfg,
+                model=model or cfg.model,
+                messages=repair_msgs,
+                temperature=min(temperature, 0.2),
+            )
+            return _parse_or_raise(content2)
 
-    def _once(c: OpenAI) -> dict[str, Any]:
+    def _once(c: OpenAI, msgs: list[dict[str, str]], temp: float) -> dict[str, Any]:
         resp = _create_chat(
             c,
             model=model,
-            messages=messages,
-            temperature=temperature,
+            messages=msgs,
+            temperature=temp,
             json_object=True,
         )
         from usage import record_page_usage
 
         record_page_usage(getattr(resp, "usage", None))
         content = (resp.choices[0].message.content or "{}").strip()
-        if content.startswith("```"):
-            content = re.sub(r"^```(?:json)?\s*", "", content, flags=re.I)
-            content = re.sub(r"\s*```$", "", content)
-        data = json.loads(content)
-        if not isinstance(data, dict):
-            raise ValueError("LLM 返回的 JSON 不是 object")
-        return data
+        try:
+            return _parse_or_raise(content)
+        except (json.JSONDecodeError, ValueError):
+            repair_msgs = list(msgs) + [
+                {"role": "assistant", "content": content[:4000]},
+                {"role": "user", "content": _JSON_RETRY_HINT},
+            ]
+            resp2 = _create_chat(
+                c,
+                model=model,
+                messages=repair_msgs,
+                temperature=min(temp, 0.2),
+                json_object=True,
+            )
+            record_page_usage(getattr(resp2, "usage", None))
+            content2 = (resp2.choices[0].message.content or "{}").strip()
+            return _parse_or_raise(content2)
 
-    return _run_with_pool(pool=pool, client=client, fn=_once)
+    return _run_with_pool(
+        pool=pool,
+        client=client,
+        fn=lambda c: _once(c, messages, temperature),
+    )
 
 
 def chat_text(

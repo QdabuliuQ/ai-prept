@@ -20,7 +20,7 @@ def get_qiniu_config() -> dict[str, str] | None:
     domain = os.environ.get("QINIU_DOMAIN", "").strip().rstrip("/")
     if not access_key or not secret_key or not bucket or not domain:
         return None
-    prefix = (os.environ.get("QINIU_KEY_PREFIX") or "webppt/").strip()
+    prefix = (os.environ.get("QINIU_KEY_PREFIX") or "ai-prept/").strip()
     if not prefix.endswith("/"):
         prefix += "/"
     return {

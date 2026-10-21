@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 
 const frontendDir = path.resolve(fileURLToPath(new URL(".", import.meta.url)));
 const repoRoot = path.resolve(frontendDir, "..");
-const apiTarget = process.env.GALLERY_API_URL || "http://127.0.0.1:8787";
+const apiTarget = process.env.GALLERY_API_URL || "http://127.0.0.1:8790";
 
 export default defineConfig({
   root: frontendDir,
@@ -14,7 +14,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(frontendDir, "src"),
-      "@webppt/html-to-pptx": path.resolve(
+      "@ai-prept/html-to-pptx": path.resolve(
         repoRoot,
         "packages/html-to-pptx/src/index.ts",
       ),

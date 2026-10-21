@@ -313,13 +313,13 @@ def _style_hints_from_jobs() -> dict[str, str]:
                 tids.append(t)
         if data.get("convertTemplateId"):
             tids.append(str(data["convertTemplateId"]).strip())
-        # 日志里的真实落地 id：webppt-<id>-… / --template-id <id>
+        # 日志里的真实落地 id：ai-prept-<id>-… / --template-id <id>
         for m in re.finditer(
-            r"(?:webppt-|--template-id\s+|id=)([A-Za-z0-9._\u4e00-\u9fff-]{4,})",
+            r"(?:ai-prept-|--template-id\s+|id=)([A-Za-z0-9._\u4e00-\u9fff-]{4,})",
             log,
         ):
             token = m.group(1).strip().strip("\"'")
-            # 去掉 webppt-xxx 后的 hash 后缀：EMviRDhnkCIG-193654ff17 → EMviRDhnkCIG
+            # 去掉 ai-prept-xxx 后的 hash 后缀：EMviRDhnkCIG-193654ff17 → EMviRDhnkCIG
             if "-" in token and re.search(r"-[0-9a-f]{6,}$", token):
                 token = token.rsplit("-", 1)[0]
             if token and id_token.fullmatch(token):

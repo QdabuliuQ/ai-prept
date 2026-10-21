@@ -26,7 +26,7 @@ export type GalleryModelsCatalog = {
   defaults: Partial<GalleryModelPrefs>;
 };
 
-export const GALLERY_MODEL_PREFS_KEY = "webppt:gallery-model-prefs";
+export const GALLERY_MODEL_PREFS_KEY = "ai-prept:gallery-model-prefs";
 
 export function readModelPrefs(): Partial<GalleryModelPrefs> {
   try {

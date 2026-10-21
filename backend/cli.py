@@ -12,8 +12,8 @@ __version__ = "0.3.0"
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="webppt-backend",
-        description="WebPPT 后端：API 服务与 PPT Master 生成管线",
+        prog="ai-prept-backend",
+        description="AI Prept 后端：API 服务与 PPT Master 生成管线",
     )
     p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="dark-tech",
         help=(
             "视觉风格 id，或一段风格意图（配合 --ensure-style）。"
-            "已有卡见 _catalog.json；重建：webppt-backend styles-catalog"
+            "已有卡见 _catalog.json；重建：ai-prept-backend styles-catalog"
         ),
     )
     pm.add_argument(
@@ -339,17 +339,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     gs = sub.add_parser(
         "gallery-serve",
-        help="启动 API（gallery + admin，默认 127.0.0.1:8787；同 serve）",
+        help="启动 API（gallery + admin，默认 127.0.0.1:8790；同 serve）",
     )
     gs.add_argument("--host", default="127.0.0.1")
-    gs.add_argument("--port", type=int, default=8787)
+    gs.add_argument("--port", type=int, default=8790)
 
     sv = sub.add_parser(
         "serve",
-        help="启动 WebPPT API（gallery + admin，默认 127.0.0.1:8787）",
+        help="启动 AI Prept API（gallery + admin，默认 127.0.0.1:8790）",
     )
     sv.add_argument("--host", default="127.0.0.1")
-    sv.add_argument("--port", type=int, default=8787)
+    sv.add_argument("--port", type=int, default=8790)
 
     sub.add_parser(
         "gallery-sync",
@@ -381,7 +381,7 @@ def _cmd_visual_spec(args: argparse.Namespace) -> int:
 
 
 def _cmd_doctor() -> int:
-    print(f"webppt-backend {__version__}")
+    print(f"ai-prept-backend {__version__}")
 
     try:
         cfg = llm_config()

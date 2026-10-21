@@ -1,11 +1,11 @@
-# `@webppt/html-to-pptx`
+# `@ai-prept/html-to-pptx`
 
 从零实现的浏览器端 **HTML 幻灯片 → 可编辑 PPTX** 库。打包层只用 **pptxgenjs**。
 
 ## 公共 API
 
 ```ts
-import { exportPPTX, generatePPTX } from "@webppt/html-to-pptx";
+import { exportPPTX, generatePPTX } from "@ai-prept/html-to-pptx";
 
 await exportPPTX(pages, { fileName: "deck.pptx" }).promise;
 const blob = await generatePPTX(pages, opts).promise;

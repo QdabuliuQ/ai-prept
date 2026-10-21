@@ -1,4 +1,4 @@
-# WebPPT Backend
+# AI Prept Backend
 
 Python FastAPI：模板墙、Admin、prepare/上传、生成任务。
 
@@ -9,8 +9,8 @@ source .venv/bin/activate
 pip install -U pip setuptools wheel
 pip install -e '.[api]'
 
-webppt-backend gallery-sync
-webppt-backend serve   # http://127.0.0.1:8787
+ai-prept-backend gallery-sync
+ai-prept-backend serve   # http://127.0.0.1:8787
 ```
 
 环境变量见仓库根 `.env.local` / `.env.example`（也会读 `backend/.env`）。

@@ -17,8 +17,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./frontend/src/*"],
-      "@webppt/html-to-pptx": ["./packages/html-to-pptx/src/index.ts"],
-      "@webppt/html-to-pptx/*": ["./packages/html-to-pptx/src/*"]
+      "@ai-prept/html-to-pptx": ["./packages/html-to-pptx/src/index.ts"],
+      "@ai-prept/html-to-pptx/*": ["./packages/html-to-pptx/src/*"]
     },
     "noUnusedLocals": true,
     "noUnusedParameters": true,

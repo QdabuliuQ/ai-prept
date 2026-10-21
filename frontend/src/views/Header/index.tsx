@@ -211,7 +211,7 @@ export const Header: FC = () => {
     }
   });
 
-  // 导出 PPTX：html-slide → @webppt/html-to-pptx
+  // 导出 PPTX：html-slide → @ai-prept/html-to-pptx
   const handleExportPptx = useMemoizedFn(async () => {
     if (exportDisabled) return;
 
@@ -431,7 +431,7 @@ export const Header: FC = () => {
             <Link to="/" className={styles.brandLink} aria-label={t("header.home")}>
               <img
                 src={logo}
-                alt="Ai Prept"
+                alt="AI Prept"
                 width={28}
                 height={28}
                 className={styles.brandLogo}
@@ -453,6 +453,26 @@ export const Header: FC = () => {
           />
         </div>
       </div>
+
+      <nav className={styles.navTrack} aria-label="editor modes">
+        {menuItems.map((item) => {
+          const active = menuActive === item.key;
+          return (
+            <button
+              type="button"
+              key={item.key}
+              className={`${styles.navItem} ${active ? styles.activeItem : ""}`}
+              aria-current={active ? "page" : undefined}
+              onClick={() => setActiveMenu(item.key)}
+            >
+              <i className={styles.navIcon} aria-hidden>
+                {item.icon}
+              </i>
+              {item.label}
+            </button>
+          );
+        })}
+      </nav>
 
       <div className={styles.toolbar}>
         <div className={styles.exportGroup}>
@@ -510,7 +530,7 @@ export const Header: FC = () => {
                   <ChevronDown className="size-3" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="min-w-[10rem] text-[12px]">
+              <DropdownMenuContent align="end" className="min-w-[10rem] text-[12px]">
                 {exportMenuItems.map((item) => (
                   <DropdownMenuItem
                     key={item.key}
@@ -526,26 +546,6 @@ export const Header: FC = () => {
             </DropdownMenu>
           )}
         </div>
-
-        <nav className={styles.navTrack} aria-label="editor modes">
-          {menuItems.map((item) => {
-            const active = menuActive === item.key;
-            return (
-              <button
-                type="button"
-                key={item.key}
-                className={`${styles.navItem} ${active ? styles.activeItem : ""}`}
-                aria-current={active ? "page" : undefined}
-                onClick={() => setActiveMenu(item.key)}
-              >
-                <i className={styles.navIcon} aria-hidden>
-                  {item.icon}
-                </i>
-                {item.label}
-              </button>
-            );
-          })}
-        </nav>
 
         <div className={styles.utils}>
           <ThemeSwitcher />

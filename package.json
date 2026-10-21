@@ -1,10 +1,10 @@
 {
-  "name": "webppt",
+  "name": "ai-prept",
   "private": true,
   "version": "0.0.0",
   "scripts": {
     "dev": "vite --config frontend/vite.config.ts",
-    "dev:api": "cd backend && .venv/bin/webppt-backend serve",
+    "dev:api": "cd backend && .venv/bin/ai-prept-backend serve",
     "build": "npm run build:slide-editor && vite build --config frontend/vite.config.ts",
     "build:slide-vendor": "tailwindcss -c scripts/slide-vendor.tailwind.config.js -i scripts/slide-vendor-input.css -o frontend/public/slide-vendor/utilities.css --minify",
     "build:slide-editor": "node scripts/build-slide-editor.js",

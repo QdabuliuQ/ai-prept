@@ -1,5 +1,5 @@
 /**
- * Write WebPPT html-slide template package to disk.
+ * Write AI Prept html-slide template package to disk.
  */
 
 import fs from "node:fs";

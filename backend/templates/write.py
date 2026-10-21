@@ -5,8 +5,9 @@ from pathlib import Path
 
 from image.generate import (
     collect_local_images,
-    extract_theme_colors,
+    extract_image_color_brief,
     materialize_images,
+    resolve_image_theme_colors,
 )
 from templates.normalize import normalize_slide_html
 from templates.sanitize import sanitize_export_css
@@ -97,20 +98,25 @@ def _write_html_package(
 
     if not skip_images:
         refs = collect_local_images([s.html for s in package.slides])
+        spec_text = package.visual_spec or package.visual_spec_outline
         style_hint = " ".join(
             [
-                package.label_zh,
-                package.description_zh[:80],
-                (package.visual_spec_outline or package.visual_spec)[:200],
+                getattr(package, "visual_style", "") or "",
+                spec_text[:500],
             ]
         ).strip()
-        theme_colors = extract_theme_colors(package.theme_css)
+        theme_colors = resolve_image_theme_colors(
+            package.theme_css,
+            spec_text,
+            package_dir=out_dir,
+        )
         warnings = materialize_images(
             images_dir,
             refs,
             style_hint=style_hint,
             bg_hex=theme_colors.get("bg"),
             theme_colors=theme_colors,
+            palette_brief=extract_image_color_brief(spec_text),
         )
         package.warnings.extend(warnings)
 
@@ -165,13 +171,22 @@ def rematerialize_package_images(
     if spec_path.is_file():
         visual_spec = spec_path.read_text(encoding="utf-8")
 
-    label = (meta.get("label") or {}).get("zh_CN") or meta.get("template_id") or ""
-    desc = (meta.get("description") or {}).get("zh_CN") or ""
+    # Prefer design language over content title — remix labels describe topic,
+    # not palette; stuffing them into style_hint drifts dark decks to bright stock.
+    visual_style = str(meta.get("visual_style") or "").strip()
     outline = str(meta.get("visual_spec_outline") or "")
+    spec_text = visual_spec or outline
     style_hint = " ".join(
-        [str(label), str(desc)[:80], (visual_spec or outline)[:200]]
+        [
+            visual_style,
+            spec_text[:500],
+        ]
     ).strip()
-    theme_colors = extract_theme_colors(theme_css)
+    theme_colors = resolve_image_theme_colors(
+        theme_css,
+        spec_text,
+        package_dir=out_dir,
+    )
     with track_usage() as usage:
         warnings = materialize_images(
             out_dir / "images",
@@ -179,6 +194,7 @@ def rematerialize_package_images(
             style_hint=style_hint,
             bg_hex=theme_colors.get("bg"),
             theme_colors=theme_colors,
+            palette_brief=extract_image_color_brief(spec_text),
             force=bool(force),
         )
         meta["usage"] = usage.merge_into(

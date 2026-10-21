@@ -226,7 +226,7 @@ def prepare_template_package(
     public_id = ensure_public_id(template_id, meta)
     save_client_preview_shots(gate["previewDir"], preview_inputs, gate["slideCount"])
 
-    with tempfile.TemporaryDirectory(prefix="webppt-pack-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="ai-prept-pack-") as tmp:
         tmp_root = Path(tmp)
         work_dir = tmp_root / public_id
         shutil.copytree(root, work_dir)

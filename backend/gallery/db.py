@@ -45,7 +45,7 @@ def database_url() -> str:
     if not url:
         raise RuntimeError(
             "未配置 DATABASE_URL。请在 .env.local 设置 PostgreSQL 连接串，例如 "
-            "postgresql://webppt:webppt@127.0.0.1:5432/webppt"
+            "postgresql://ai-prept:ai-prept@127.0.0.1:5432/ai-prept"
         )
     return url
 
