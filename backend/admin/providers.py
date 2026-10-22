@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from config import load_env, parse_api_keys
+from config import LlmConfig, _env_float, _env_int, load_env, parse_api_keys
 
 LLM_PROVIDERS: list[dict[str, Any]] = [
     {
@@ -135,18 +135,22 @@ LLM_PROVIDERS: list[dict[str, Any]] = [
             {
                 "id": "gemini-3.8-flash",
                 "label": "gemini-3.8-flash",
+                "vision": True,
             },
             {
                 "id": "gemini-3.5-flash-lite",
                 "label": "gemini-3.5-flash-lite",
+                "vision": True,
             },
             {
                 "id": "gemini-3.1-flash",
                 "label": "gemini-3.1-flash",
+                "vision": True,
             },
             {
                 "id": "gemini-3.1-flash-lite",
                 "label": "gemini-3.1-flash-lite",
+                "vision": True,
             },
         ],
         "keyEnvNames": [
@@ -178,6 +182,47 @@ LLM_PROVIDERS: list[dict[str, Any]] = [
             "GROQ_API_KEYS",
             "GROQ_API_KEY",
         ],
+    },
+    {
+        "id": "agnes",
+        "label": "Agnes AI",
+        "tier": "heavy",
+        # OpenAI 兼容：https://apihub.agnes-ai.com/v1/chat/completions
+        # 与文生图共用 AGNES_API_KEY / AGNES_BASE_URL
+        "baseUrl": "https://apihub.agnes-ai.com/v1",
+        "models": [
+            {
+                "id": "agnes-3.0-flash",
+                "label": "agnes-3.0-flash（默认 · 512K）",
+            },
+            {
+                "id": "agnes-2.5-flash",
+                "label": "agnes-2.5-flash",
+            },
+            {
+                "id": "agnes-2.5-pro-alpha",
+                "label": "agnes-2.5-pro-alpha（需额度）",
+            },
+            {
+                "id": "agnes-2.5-pro-beta",
+                "label": "agnes-2.5-pro-beta（需额度）",
+            },
+        ],
+        "keyEnvNames": ["AGNES_API_KEYS", "AGNES_API_KEY"],
+    },
+    {
+        "id": "opencode",
+        "label": "OpenCode 反代",
+        "tier": "heavy",
+        # OpenAI 兼容：http://127.0.0.1:8787/v1/chat/completions
+        "baseUrl": "http://127.0.0.1:8787/v1",
+        "models": [
+            {
+                "id": "opencode/deepseek-v4.1-flash-free",
+                "label": "DeepSeek V4.1 Flash Free",
+            },
+        ],
+        "keyEnvNames": ["OPENCODE_API_KEYS", "OPENCODE_API_KEY"],
     },
     {
         "id": "freeshare",
@@ -214,7 +259,7 @@ LLM_PROVIDERS: list[dict[str, Any]] = [
             {"id": "glm-5.3-flash", "label": "glm-5.3-flash"},
             {"id": "glm-5.2", "label": "glm-5.2"},
             {"id": "glm-5.1", "label": "glm-5.1"},
-            {"id": "glm-5v-turbo", "label": "glm-5v-turbo"},
+            {"id": "glm-5v-turbo", "label": "glm-5v-turbo", "vision": True},
             {"id": "minimax-m3", "label": "minimax-m3"},
             {"id": "minimax-m2.7", "label": "minimax-m2.7"},
             {"id": "kimi-k3-1", "label": "kimi-k3-1"},
@@ -232,6 +277,27 @@ LLM_PROVIDERS: list[dict[str, Any]] = [
 ]
 
 IMAGE_PROVIDERS: list[dict[str, Any]] = [
+    {
+        "id": "agnes",
+        "label": "Agnes AI 文生图",
+        "baseUrl": "https://apihub.agnes-ai.com/v1",
+        "models": [
+            {
+                "id": "agnes-image-2.5-flash",
+                "label": "Agnes Image 2.5 Flash",
+            },
+            {
+                "id": "agnes-image-2.1-flash",
+                "label": "Agnes Image 2.1 Flash",
+            },
+            {
+                "id": "agnes-image-2.0-flash",
+                "label": "Agnes Image 2.0 Flash",
+            },
+        ],
+        "keyEnvNames": ["AGNES_API_KEYS", "AGNES_API_KEY"],
+        "transport": "agnes-images",
+    },
     {
         "id": "openai",
         "label": "OpenAI Images 兼容",
@@ -326,6 +392,14 @@ def list_llm_providers_public() -> list[dict[str, Any]]:
             )
         if p["id"] == "groq":
             row["baseUrl"] = _env("GROQ_BASE_URL") or row["baseUrl"]
+        if p["id"] == "agnes":
+            row["baseUrl"] = (
+                _env("AGNES_LLM_BASE_URL")
+                or _env("AGNES_BASE_URL")
+                or row["baseUrl"]
+            )
+        if p["id"] == "opencode":
+            row["baseUrl"] = _env("OPENCODE_BASE_URL") or row["baseUrl"]
         if p["id"] == "freeshare":
             row["baseUrl"] = _env("FREESHARE_BASE_URL") or row["baseUrl"]
         if p["id"] == "workbuddy":
@@ -337,6 +411,17 @@ def list_llm_providers_public() -> list[dict[str, Any]]:
     return out
 
 
+def list_vision_providers_public() -> list[dict[str, Any]]:
+    """Return configured providers/models that accept image input."""
+    out: list[dict[str, Any]] = []
+    for provider in list_llm_providers_public():
+        models = [m for m in provider.get("models") or [] if m.get("vision")]
+        if not provider.get("configured") or not models:
+            continue
+        out.append({**provider, "models": models})
+    return out
+
+
 def list_image_providers_public() -> list[dict[str, Any]]:
     out = []
     for p in IMAGE_PROVIDERS:
@@ -344,6 +429,8 @@ def list_image_providers_public() -> list[dict[str, Any]]:
         row = dict(p)
         if p["id"] == "openai":
             row["baseUrl"] = _env("IMAGE_API_BASE_URL") or row.get("baseUrl") or ""
+        if p["id"] == "agnes":
+            row["baseUrl"] = _env("AGNES_BASE_URL") or row["baseUrl"]
         row["configured"] = bool(keys) if p["id"] != "openai" else bool(keys and row["baseUrl"])
         if p["id"] == "openai" and not row["baseUrl"]:
             # still show configured if keys exist (server may inject)
@@ -379,6 +466,10 @@ def resolve_llm_selection(
         base = _env("GEMINI_BASE_URL") or _env("GOOGLE_AI_BASE_URL") or base
     if pid == "groq":
         base = _env("GROQ_BASE_URL") or base
+    if pid == "agnes":
+        base = _env("AGNES_LLM_BASE_URL") or _env("AGNES_BASE_URL") or base
+    if pid == "opencode":
+        base = _env("OPENCODE_BASE_URL") or base
     if pid == "freeshare":
         base = _env("FREESHARE_BASE_URL") or base
     if pid == "workbuddy":
@@ -390,6 +481,76 @@ def resolve_llm_selection(
         "baseUrl": base,
         "keys": keys,
     }
+
+
+def resolve_vision_selection(
+    provider: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Resolve an explicitly selected vision model or the configured default."""
+    load_env()
+    providers = list_vision_providers_public()
+    if not providers:
+        raise RuntimeError(
+            "没有可用的视觉模型。请配置 Gemini，或配置 WorkBuddy 的 glm-5v-turbo。"
+        )
+
+    requested_provider = (
+        provider or os.environ.get("LLM_VISION_PROVIDER") or ""
+    ).strip()
+    requested_model = (
+        model or os.environ.get("LLM_VISION_MODEL") or ""
+    ).strip()
+    if not requested_provider:
+        requested_provider = (
+            "gemini"
+            if any(p["id"] == "gemini" for p in providers)
+            else providers[0]["id"]
+        )
+
+    found = next((p for p in providers if p["id"] == requested_provider), None)
+    if found is None:
+        raise RuntimeError(
+            f"所选供应商 {requested_provider!r} 没有已配置的视觉模型。"
+        )
+    models = found.get("models") or []
+    selected_model = next(
+        (
+            m["id"]
+            for m in models
+            if not requested_model or m["id"] == requested_model
+        ),
+        None,
+    )
+    if selected_model is None:
+        available = ", ".join(str(m["id"]) for m in models)
+        raise RuntimeError(
+            f"所选模型 {requested_model!r} 不支持视觉分析；"
+            f"{found['label']} 可用：{available}"
+        )
+
+    selection = resolve_llm_selection(found["id"], selected_model)
+    if not selection.get("keys"):
+        raise RuntimeError(f"未配置 {found['label']} 的 API Key")
+    return selection
+
+
+def llm_config_for_selection(selection: dict[str, Any]) -> LlmConfig:
+    """Build an LlmConfig for an Admin model selection without mutating env."""
+    keys = tuple(selection.get("keys") or ())
+    if not keys:
+        raise RuntimeError("未配置所选模型的 API Key")
+    provider = str(selection.get("provider") or "")
+    timeout_default = 360.0 if provider == "workbuddy" else 180.0
+    attempts_default = 2 if provider == "workbuddy" else 3
+    return LlmConfig(
+        api_keys=keys,
+        base_url=str(selection["baseUrl"]).rstrip("/"),
+        model=str(selection["model"]),
+        timeout_s=_env_float("LLM_VISION_TIMEOUT", timeout_default),
+        max_retries=_env_int("LLM_SDK_RETRIES", 1, lo=0, hi=5),
+        attempts=_env_int("LLM_ATTEMPTS", attempts_default, lo=1, hi=12),
+    )
 
 
 def resolve_image_selection(
@@ -408,6 +569,8 @@ def resolve_image_selection(
     base = found["baseUrl"]
     if pid == "openai":
         base = _env("IMAGE_API_BASE_URL") or base
+    if pid == "agnes":
+        base = _env("AGNES_BASE_URL") or base
     return {
         "provider": found["id"],
         "model": mid,
@@ -444,6 +607,12 @@ def llm_env_for_dual(selection: dict[str, Any]) -> dict[str, str]:
     if selection["provider"] == "groq":
         env["GROQ_API_KEY"] = keys[0]
         env["GROQ_API_KEYS"] = ",".join(keys)
+    if selection["provider"] == "agnes":
+        env["AGNES_API_KEY"] = keys[0]
+        env["AGNES_API_KEYS"] = ",".join(keys)
+    if selection["provider"] == "opencode":
+        env["OPENCODE_API_KEY"] = keys[0]
+        env["OPENCODE_API_KEYS"] = ",".join(keys)
     if selection["provider"] == "freeshare":
         env["FREESHARE_API_KEY"] = keys[0]
         env["FREESHARE_API_KEYS"] = ",".join(keys)
@@ -495,7 +664,7 @@ def list_gallery_model_catalog() -> dict[str, Any]:
         return "gemini", "gemini-3.8-flash"
 
     def _pick_image() -> tuple[str, str]:
-        for prefer in ("siliconflow", "openai", "pollinations"):
+        for prefer in ("agnes", "siliconflow", "openai", "pollinations"):
             hit = next(
                 (x for x in image_out if x["id"] == prefer and x["configured"]), None
             )
@@ -534,6 +703,8 @@ def image_env_for_selection(selection: dict[str, Any]) -> dict[str, str]:
         raise RuntimeError("未配置 IMAGE_API_BASE_URL")
     if provider == "siliconflow" and not keys:
         raise RuntimeError("未配置 SILICONFLOW_API_KEY")
+    if provider == "agnes" and not keys:
+        raise RuntimeError("未配置 AGNES_API_KEY")
     env = {
         "IMAGE_API_PROVIDER": provider,
         "IMAGE_MODEL": selection["model"],
@@ -550,4 +721,7 @@ def image_env_for_selection(selection: dict[str, Any]) -> dict[str, str]:
     if provider == "pollinations" and keys:
         env["POLLINATIONS_API_KEY"] = keys[0]
         env["POLLINATIONS_API_KEYS"] = ",".join(keys)
+    if provider == "agnes" and keys:
+        env["AGNES_API_KEY"] = keys[0]
+        env["AGNES_API_KEYS"] = ",".join(keys)
     return env

@@ -29,6 +29,11 @@ export type TemplateSummary = {
   sourceTemplateId?: string | null;
   /** 本地是否已有非空 visual-spec.md */
   hasVisualSpec?: boolean;
+  /** 模板结构/容量契约状态：ready | stale | missing | review_required */
+  hasCapacity?: boolean;
+  capacityStatus?: string;
+  capacitySlots?: number;
+  capacityIssues?: number;
   hasPreviewPack?: boolean;
   hasPackageZip?: boolean;
   pageTokens?: number | null;
@@ -122,7 +127,7 @@ export type LlmProviderPublic = {
   label: string;
   tier?: "heavy" | "light";
   baseUrl: string;
-  models: { id: string; label: string }[];
+  models: { id: string; label: string; vision?: boolean }[];
   configured: boolean;
   keyCount?: number;
   keyHint?: string;

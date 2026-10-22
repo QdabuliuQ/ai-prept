@@ -164,7 +164,7 @@ def _workers_ai_chat(
     cfg: LlmConfig,
     api_key: str,
     model: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     temperature: float,
 ) -> str:
     url = _workers_ai_run_url(cfg, model)
@@ -359,12 +359,25 @@ def _qwen_thinking_extra(model: str) -> dict[str, Any] | None:
     return {"enable_thinking": enable}
 
 
+def _agnes_thinking_extra(model: str) -> dict[str, Any] | None:
+    """Agnes 2.5 / 3.0：用 OpenAI 兼容的 chat_template_kwargs 开关思考。
+
+    agnes-2.5-flash 默认开思考，短请求也会先吐 reasoning_content 并占
+    max_tokens；默认关，LLM_THINKING=1 / Admin 思考开关再打开。
+    """
+    m = (model or "").lower()
+    if not m.startswith("agnes-"):
+        return None
+    return {"chat_template_kwargs": {"enable_thinking": _llm_thinking_on()}}
+
+
 def _chat_extra_body(model: str) -> dict[str, Any] | None:
     extra: dict[str, Any] = {}
     for part in (
         _thinking_type_extra(model),
         _gemini_thinking_extra(model),
         _qwen_thinking_extra(model),
+        _agnes_thinking_extra(model),
     ):
         if part:
             extra.update(part)
@@ -375,7 +388,7 @@ def _create_chat(
     client: OpenAI,
     *,
     model: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     temperature: float,
     json_object: bool,
 ):
@@ -457,7 +470,7 @@ def _run_workers_ai(
     client: OpenAI | None,
     cfg: LlmConfig,
     model: str,
-    messages: list[dict[str, str]],
+    messages: list[dict[str, Any]],
     temperature: float,
 ) -> str:
     max_attempts = max(1, (pool.attempts if pool else None) or cfg.attempts or 3)
@@ -491,18 +504,22 @@ def _normalize_chat_messages(
     *,
     system: str = "",
     user: str = "",
-    messages: list[dict[str, str]] | None = None,
-) -> list[dict[str, str]]:
-    """Build a chat message list; prefer an explicit multi-turn ``messages``."""
+    messages: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Build a chat message list, preserving multimodal content blocks."""
     if messages is not None:
         if not messages:
             raise ValueError("messages 不能为空")
-        out: list[dict[str, str]] = []
+        out: list[dict[str, Any]] = []
         for item in messages:
             role = str(item.get("role") or "").strip()
-            content = str(item.get("content") or "")
+            content = item.get("content")
             if role not in {"system", "user", "assistant"}:
                 raise ValueError(f"不支持的 message role: {role!r}")
+            if not isinstance(content, (str, list)):
+                raise ValueError(
+                    f"message content 必须是字符串或内容块数组: {type(content).__name__}"
+                )
             out.append({"role": role, "content": content})
         return out
     if not system and not user:
@@ -583,7 +600,7 @@ def chat_json(
     model: str,
     system: str = "",
     user: str = "",
-    messages: list[dict[str, str]] | None = None,
+    messages: list[dict[str, Any]] | None = None,
     temperature: float = 0.4,
     pool: LlmClientPool | None = None,
 ) -> dict[str, Any]:
@@ -610,7 +627,7 @@ def chat_json(
         try:
             return _parse_or_raise(content)
         except (json.JSONDecodeError, ValueError):
-            repair_msgs = list(messages) + [
+            repair_msgs: list[dict[str, Any]] = list(messages) + [
                 {"role": "assistant", "content": content[:4000]},
                 {"role": "user", "content": _JSON_RETRY_HINT},
             ]
@@ -624,7 +641,7 @@ def chat_json(
             )
             return _parse_or_raise(content2)
 
-    def _once(c: OpenAI, msgs: list[dict[str, str]], temp: float) -> dict[str, Any]:
+    def _once(c: OpenAI, msgs: list[dict[str, Any]], temp: float) -> dict[str, Any]:
         resp = _create_chat(
             c,
             model=model,
@@ -667,7 +684,7 @@ def chat_text(
     model: str,
     system: str = "",
     user: str = "",
-    messages: list[dict[str, str]] | None = None,
+    messages: list[dict[str, Any]] | None = None,
     temperature: float = 0.4,
     pool: LlmClientPool | None = None,
 ) -> str:

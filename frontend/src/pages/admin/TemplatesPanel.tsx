@@ -27,7 +27,9 @@ import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -68,10 +70,22 @@ import {
   toneBadge,
   useConfirmDialog,
 } from "./shared";
-import type { TemplateStatus, TemplateSummary } from "./types";
+import type {
+  LlmProviderPublic,
+  TemplateStatus,
+  TemplateSummary,
+} from "./types";
 import { pptxBrowserConvert } from "@/utils/pptxBrowserConvert";
 
 const PAGE_SIZE = 10;
+
+const markdownModelValue = (provider: string, model: string) =>
+  `${provider}::${model}`;
+
+const parseMarkdownModelValue = (value: string) => {
+  const [provider, model] = value.split("::");
+  return provider && model ? { provider, model } : null;
+};
 
 export function TemplatesPanel({
   onRemixQueued,
@@ -89,7 +103,7 @@ export function TemplatesPanel({
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   /** review=待审批 → ready=已通过待上传 → live=已上传公开 */
   const [catalogTab, setCatalogTab] = useState<"review" | "ready" | "live">(
-    "review",
+    "review"
   );
   const [search, setSearch] = useState("");
   const [tablePage, setTablePage] = useState(1);
@@ -107,6 +121,7 @@ export function TemplatesPanel({
       | "batch-approve"
       | "batch-reject"
       | "batch-upload"
+      | "batch-visual-spec"
       | "use-template"
       | "open-editor"
       | "export-pptx"
@@ -132,6 +147,11 @@ export function TemplatesPanel({
   const [previewFrameKey, setPreviewFrameKey] = useState(0);
   const [rewriteIssue, setRewriteIssue] = useState("");
   const [rewriting, setRewriting] = useState(false);
+  const [visionProviders, setVisionProviders] = useState<LlmProviderPublic[]>(
+    []
+  );
+  const [markdownModel, setMarkdownModel] = useState("");
+  const [markdownModelsLoading, setMarkdownModelsLoading] = useState(true);
   const [useTemplate, setUseTemplate] = useState<TemplateSummary | null>(null);
   const [usePrompt, setUsePrompt] = useState("");
   const [useRegenImages, setUseRegenImages] = useState(false);
@@ -140,6 +160,16 @@ export function TemplatesPanel({
   const isBusy = (id: string, action: NonNullable<typeof busy>["action"]) =>
     busy?.id === id && busy.action === action;
   const rowBusy = (id: string) => busy?.id === id;
+
+  const selectedMarkdownOption = visionProviders
+    .flatMap((provider) =>
+      provider.models.map((model) => ({
+        provider,
+        model,
+        value: markdownModelValue(provider.id, model.id),
+      }))
+    )
+    .find((option) => option.value === markdownModel);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,6 +194,54 @@ export function TemplatesPanel({
   }, [load]);
 
   useEffect(() => {
+    let cancelled = false;
+    const boot = async () => {
+      setMarkdownModelsLoading(true);
+      try {
+        const data = await adminFetch("/api/admin/llm");
+        if (cancelled) return;
+        const providers = (
+          (data.visionProviders || []) as LlmProviderPublic[]
+        ).filter(
+          (provider) => provider.configured && provider.models.length > 0
+        );
+        setVisionProviders(providers);
+
+        const fallback = providers[0]
+          ? markdownModelValue(providers[0].id, providers[0].models[0].id)
+          : "";
+        const preferred =
+          data.visionDefault?.provider && data.visionDefault?.model
+            ? markdownModelValue(
+                String(data.visionDefault.provider),
+                String(data.visionDefault.model)
+              )
+            : fallback;
+        const validValues = new Set(
+          providers.flatMap((provider) =>
+            provider.models.map((model) =>
+              markdownModelValue(provider.id, model.id)
+            )
+          )
+        );
+        setMarkdownModel((current) =>
+          validValues.has(current) ? current : preferred
+        );
+      } catch (e) {
+        if (!cancelled) {
+          toast.error(e instanceof Error ? e.message : "加载视觉模型列表失败");
+        }
+      } finally {
+        if (!cancelled) setMarkdownModelsLoading(false);
+      }
+    };
+    void boot();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     const id = (focusTemplateId || "").trim();
     if (!id) return;
     setHighlightId(id);
@@ -175,7 +253,7 @@ export function TemplatesPanel({
   const setStatus = async (
     id: string,
     status: TemplateStatus,
-    action: "approve" | "reject" | "pending",
+    action: "approve" | "reject" | "pending"
   ) => {
     setBusy({ id, action });
     try {
@@ -189,15 +267,15 @@ export function TemplatesPanel({
       if (status === "approved" && svgFallback) {
         toast.warning(
           "已通过，但该包「未转 HTML」（SVG 兜底），不是标准可编辑 html-slide",
-          { duration: 8000 },
+          { duration: 8000 }
         );
       } else {
         toast.success(
           status === "approved"
-            ? "已通过，请生成规范后上传七牛"
+            ? "已通过，请生成 Markdown 后上传七牛"
             : status === "rejected"
               ? "已驳回"
-              : "已更新",
+              : "已更新"
         );
       }
       await load();
@@ -278,7 +356,7 @@ export function TemplatesPanel({
     }
     const idSet = new Set(ids);
     const qiniuCount = rows.filter(
-      (r) => idSet.has(r.id) && r.storageBackend === "qiniu",
+      (r) => idSet.has(r.id) && r.storageBackend === "qiniu"
     ).length;
     confirm({
       title: `批量删除 ${ids.length} 个模板？`,
@@ -317,13 +395,13 @@ export function TemplatesPanel({
             toast.success(
               qiniuCount > 0
                 ? `已删除 ${deleted} 个模板（含七牛）`
-                : `已删除 ${deleted} 个本地模板`,
+                : `已删除 ${deleted} 个本地模板`
             );
           } else {
             toast.warning(
               `删除 ${deleted} 个，失败 ${failed.length} 个：${failed
                 .map((f) => f.id)
-                .join(", ")}`,
+                .join(", ")}`
             );
           }
           if (deletedIds.length > 0) {
@@ -346,14 +424,14 @@ export function TemplatesPanel({
     setBusy({ id, action: "preview" });
     try {
       const data = await adminFetch(
-        `/api/admin/templates/${encodeURIComponent(id)}`,
+        `/api/admin/templates/${encodeURIComponent(id)}`
       );
       setPreview({
         id,
         format: data.format || data.meta?.format || "html-slide",
         render: data.render || data.meta?.render,
         htmlConvertFailed: Boolean(
-          data.htmlConvertFailed ?? data.render === "svg-fallback",
+          data.htmlConvertFailed ?? data.render === "svg-fallback"
         ),
         reviewNote: data.reviewNote || data.meta?.review?.note || null,
         pages: data.pages || [],
@@ -397,7 +475,7 @@ export function TemplatesPanel({
             file: current.file,
             pageIndex,
           }),
-        },
+        }
       );
       const jobId = String(data.job?.id || "");
       if (!jobId) {
@@ -409,7 +487,7 @@ export function TemplatesPanel({
         await new Promise((r) => setTimeout(r, 2000));
         try {
           const j = await adminFetch(
-            `/api/admin/generate/${encodeURIComponent(jobId)}`,
+            `/api/admin/generate/${encodeURIComponent(jobId)}`
           );
           const job = j.job || j;
           const st = String(job?.status || "");
@@ -438,7 +516,7 @@ export function TemplatesPanel({
       }
       try {
         const detail = await adminFetch(
-          `/api/admin/templates/${encodeURIComponent(preview.id)}`,
+          `/api/admin/templates/${encodeURIComponent(preview.id)}`
         );
         setPreview({
           id: preview.id,
@@ -446,7 +524,7 @@ export function TemplatesPanel({
           render: detail.render || detail.meta?.render || preview.render,
           htmlConvertFailed: Boolean(
             detail.htmlConvertFailed ??
-              (detail.render === "svg-fallback" || preview.htmlConvertFailed),
+              (detail.render === "svg-fallback" || preview.htmlConvertFailed)
           ),
           reviewNote:
             detail.reviewNote ||
@@ -460,10 +538,10 @@ export function TemplatesPanel({
       }
       setPreviewFrameKey((k) => k + 1);
       setRewriteIssue("");
-      toast.success(
-        "本页已重写。若已 prepare 上传，请重新截图后再传。",
-        { id: toastId, duration: 6000 },
-      );
+      toast.success("本页已重写。若已 prepare 上传，请重新截图后再传。", {
+        id: toastId,
+        duration: 6000,
+      });
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e), { id: toastId });
@@ -486,7 +564,7 @@ export function TemplatesPanel({
       }
       sessionStorage.setItem(
         "ai-prept:pending-template-doc",
-        JSON.stringify(data),
+        JSON.stringify(data)
       );
       toast.success("模板已加载，正在打开编辑器");
       router.push("/edit");
@@ -500,7 +578,7 @@ export function TemplatesPanel({
   const openUseTemplate = (row: TemplateSummary) => {
     if (!row.hasVisualSpec) {
       toast.warning(
-        "该模板还没有 visual-spec.md。请先点击「visual-spec」生成设计规范，再使用模板。",
+        "该模板还没有 visual-spec.md。请先点击「visual-spec」生成设计规范，再使用模板。"
       );
       return;
     }
@@ -535,9 +613,7 @@ export function TemplatesPanel({
       return;
     }
     if (!row.hasVisualSpec) {
-      toast.warning(
-        "源模板缺少 visual-spec.md，请先生成设计规范后再使用模板",
-      );
+      toast.warning("源模板缺少 visual-spec.md，请先生成设计规范后再使用模板");
       return;
     }
     setBusy({ id: row.id, action: "use-template" });
@@ -550,7 +626,7 @@ export function TemplatesPanel({
             prompt,
             skipImage: !useRegenImages,
           }),
-        },
+        }
       );
       setUseTemplate(null);
       setUsePrompt("");
@@ -559,7 +635,7 @@ export function TemplatesPanel({
       toast.success(
         jobId
           ? `已启动套用任务：${jobId}（保版式改文案）。完成后列表会自动刷新，也可在「任务日志」查看。`
-          : "已启动套用任务（保版式改文案）",
+          : "已启动套用任务（保版式改文案）"
       );
       onRemixQueued?.();
       if (jobId) {
@@ -568,7 +644,7 @@ export function TemplatesPanel({
             await new Promise((r) => setTimeout(r, 2000));
             try {
               const j = await adminFetch(
-                `/api/admin/generate/${encodeURIComponent(jobId)}`,
+                `/api/admin/generate/${encodeURIComponent(jobId)}`
               );
               const job = j.job || j;
               const st = String(job?.status || "");
@@ -588,7 +664,7 @@ export function TemplatesPanel({
                 toast.success(
                   tid
                     ? `套用完成：${tid}（已回到模板列表并定位）`
-                    : "套用完成，模板列表已刷新",
+                    : "套用完成，模板列表已刷新"
                 );
                 return;
               }
@@ -620,7 +696,7 @@ export function TemplatesPanel({
     try {
       const data = await fetchEditorDoc(id);
       const pages = (data.pages || []).filter(
-        (p: { html?: string }) => p.html && String(p.html).trim(),
+        (p: { html?: string }) => p.html && String(p.html).trim()
       );
       if (!pages.length) {
         throw new Error("没有可导出的 HTML 页面");
@@ -647,13 +723,11 @@ export function TemplatesPanel({
       const msg = e instanceof Error ? e.message : String(e);
       const isChunk =
         /Loading chunk|ChunkLoadError|Failed to fetch dynamically imported/i.test(
-          msg,
+          msg
         );
       toast.error(
-        isChunk
-          ? "导出模块加载失败，请硬刷新页面后重试"
-          : msg || "导出失败",
-        { id: key },
+        isChunk ? "导出模块加载失败，请硬刷新页面后重试" : msg || "导出失败",
+        { id: key }
       );
     } finally {
       setBusy(null);
@@ -667,7 +741,7 @@ export function TemplatesPanel({
     toast.loading(`浏览器转换中… ${id}`, { id: key });
     try {
       const buffer = await adminFetchBinary(
-        `/api/admin/templates/${encodeURIComponent(id)}/source.pptx`,
+        `/api/admin/templates/${encodeURIComponent(id)}/source.pptx`
       );
       const labelZh = String(row.label?.zh_CN || row.label?.en_US || "").trim();
       const result = await pptxBrowserConvert(buffer, {
@@ -684,7 +758,7 @@ export function TemplatesPanel({
             warnings: result.warnings,
             theme: result.theme,
           }),
-        },
+        }
       );
       toast.success(`HTML 转换完成：${id}（${result.slides.length} 页）`, {
         id: key,
@@ -705,7 +779,9 @@ export function TemplatesPanel({
       force?: boolean;
       /** 仅磁盘缺失时生成（准备/上传用，不信任列表缓存） */
       ifMissing?: boolean;
-    },
+      llmProvider?: string | null;
+      llmModel?: string | null;
+    }
   ) => {
     const row = rows.find((r) => r.id === id);
     // force：覆盖生成；ifMissing：始终打 API，由服务端判断是否已有文件
@@ -714,27 +790,57 @@ export function TemplatesPanel({
     const key = opts?.messageKey || `visual-spec-${id}`;
     const text = opts?.ifMissing
       ? "检查 / 补全 visual-spec.md…"
-      : "生成 visual-spec.md…";
-    opts?.onProgress?.(text);
-    toast.loading(text, { id: key });
+      : "逐页分析整页预览与 HTML，生成 visual-spec.md…";
+    if (opts?.onProgress) opts.onProgress(text);
+    else toast.loading(text, { id: key });
+    const selection =
+      opts?.llmProvider && opts?.llmModel
+        ? { provider: opts.llmProvider, model: opts.llmModel }
+        : parseMarkdownModelValue(markdownModel);
     await adminFetch(
       `/api/admin/templates/${encodeURIComponent(id)}/visual-spec`,
       {
         method: "POST",
         body: JSON.stringify({
           ...(opts?.ifMissing ? { ifMissing: true } : {}),
+          ...(selection
+            ? {
+                llmProvider: selection.provider,
+                llmModel: selection.model,
+              }
+            : {}),
         }),
-      },
+      }
     );
   };
 
   const generateVisualSpec = async (id: string) => {
+    const selection = parseMarkdownModelValue(markdownModel);
+    if (!selection) {
+      toast.warning("请先选择 Markdown 生成模型");
+      return;
+    }
     setBusy({ id, action: "visual-spec" });
     const key = `visual-spec-${id}`;
-    toast.loading("正在生成 visual-spec.md…", { id: key });
+    toast.loading(
+      `使用 ${selectedMarkdownOption?.provider.label || selection.provider} · ${
+        selectedMarkdownOption?.model.label || selection.model
+      } 生成 Markdown…`,
+      { id: key }
+    );
     try {
-      await ensureVisualSpec(id, { messageKey: key, force: true });
-      toast.success("visual-spec.md 已生成", { id: key });
+      await ensureVisualSpec(id, {
+        messageKey: key,
+        force: true,
+        llmProvider: selection.provider,
+        llmModel: selection.model,
+      });
+      toast.success(
+        `Markdown 已生成 · ${
+          selectedMarkdownOption?.model.label || selection.model
+        }`,
+        { id: key }
+      );
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : String(e), { id: key });
@@ -743,12 +849,112 @@ export function TemplatesPanel({
     }
   };
 
+  const batchGenerateVisualSpecs = () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) {
+      toast.warning("请先勾选要生成 Markdown 的模板");
+      return;
+    }
+    const selected = rows.filter((row) => ids.includes(row.id));
+    if (selected.length === 0) {
+      toast.warning("没有可生成 Markdown 的模板");
+      return;
+    }
+    const selection = parseMarkdownModelValue(markdownModel);
+    if (!selection) {
+      toast.warning("请先选择 Markdown 生成模型");
+      return;
+    }
+    const modelLabel = `${selectedMarkdownOption?.provider.label || selection.provider} · ${
+      selectedMarkdownOption?.model.label || selection.model
+    }`;
+    confirm({
+      title: `批量生成 ${selected.length} 个模板 Markdown？`,
+      description: (
+        <div>
+          <p className="mb-2">
+            使用 <strong>{modelLabel}</strong> 按顺序重新生成并覆盖每个模板的{" "}
+            <code className="rounded bg-muted px-1 text-xs">
+              visual-spec.md
+            </code>
+            ，并同步编译字段容量与行列结构。
+          </p>
+          <p className="mb-2 text-sm">
+            先逐页结合整页渲染预览与完整 HTML 分析版式、视觉层级和文本关系，
+            再汇总为设计规范。
+          </p>
+          <p className="mb-2 text-amber-700 dark:text-amber-300">
+            已存在的规范也会被覆盖，任务过程中请勿关闭页面。
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {selected
+              .slice(0, 8)
+              .map((row) => row.label?.zh_CN || row.id)
+              .join("、")}
+            {selected.length > 8 ? ` 等 ${selected.length} 个` : ""}
+          </p>
+        </div>
+      ),
+      okText: "开始生成",
+      onConfirm: async () => {
+        setBusy({ id: "__batch__", action: "batch-visual-spec" });
+        const key = "batch-visual-spec";
+        let ok = 0;
+        const failed: Array<{ id: string; error: string }> = [];
+        try {
+          for (let i = 0; i < selected.length; i += 1) {
+            const row = selected[i];
+            const label = row.label?.zh_CN || row.id;
+            try {
+              await ensureVisualSpec(row.id, {
+                messageKey: key,
+                force: true,
+                llmProvider: selection.provider,
+                llmModel: selection.model,
+                onProgress: (text) => {
+                  toast.loading(
+                    `[${i + 1}/${selected.length}] ${label} · ${modelLabel} · ${text}`,
+                    { id: key }
+                  );
+                },
+              });
+              ok += 1;
+            } catch (e) {
+              failed.push({
+                id: row.id,
+                error: e instanceof Error ? e.message : String(e),
+              });
+            }
+          }
+          if (failed.length === 0) {
+            toast.success(`批量生成 Markdown 完成：${ok} 个 · ${modelLabel}`, {
+              id: key,
+              duration: 6000,
+            });
+          } else {
+            toast.warning(
+              `批量生成 Markdown 结束：成功 ${ok}，失败 ${failed.length}（${failed
+                .slice(0, 3)
+                .map((item) => `${item.id}: ${item.error}`)
+                .join("；")}${failed.length > 3 ? "…" : ""}）`,
+              { id: key, duration: 10000 }
+            );
+          }
+          setSelectedIds([]);
+          await load();
+        } finally {
+          setBusy(null);
+        }
+      },
+    });
+  };
+
   const prepareOne = async (
     id: string,
     opts?: {
       messageKey?: string;
       onProgress?: (text: string) => void;
-    },
+    }
   ) => {
     const key = opts?.messageKey || `prepare-${id}`;
     const progress = (text: string) => {
@@ -767,7 +973,7 @@ export function TemplatesPanel({
 
     progress("读取页面列表…");
     const detail = await adminFetch(
-      `/api/admin/templates/${encodeURIComponent(id)}`,
+      `/api/admin/templates/${encodeURIComponent(id)}`
     );
     const slideFiles = ((detail.pages || []) as Array<{ file?: string }>)
       .map((p) => String(p.file || "").replace(/^\/+/, ""))
@@ -781,11 +987,11 @@ export function TemplatesPanel({
       slideFiles,
       (done, total) => {
         progress(`离屏截取预览图 ${done}/${total}…`);
-      },
+      }
     );
     if (shots.length !== slideFiles.length) {
       throw new Error(
-        `预览图数量不符：需要 ${slideFiles.length}，得到 ${shots.length}`,
+        `预览图数量不符：需要 ${slideFiles.length}，得到 ${shots.length}`
       );
     }
 
@@ -796,7 +1002,7 @@ export function TemplatesPanel({
     }
     return adminFetch(
       `/api/admin/templates/${encodeURIComponent(id)}/prepare`,
-      { method: "POST", body: JSON.stringify(payload) },
+      { method: "POST", body: JSON.stringify(payload) }
     );
   };
 
@@ -805,7 +1011,7 @@ export function TemplatesPanel({
     opts?: {
       messageKey?: string;
       onProgress?: (text: string) => void;
-    },
+    }
   ) => {
     const key = opts?.messageKey || `upload-qiniu-${id}`;
     const row = rows.find((r) => r.id === id);
@@ -816,10 +1022,10 @@ export function TemplatesPanel({
     const uploading = "上传压缩包和预览图…";
     opts?.onProgress?.(uploading);
     toast.loading(uploading, { id: key });
-    return adminFetch(
-      `/api/admin/templates/${encodeURIComponent(id)}/upload`,
-      { method: "POST", body: JSON.stringify({}) },
-    );
+    return adminFetch(`/api/admin/templates/${encodeURIComponent(id)}/upload`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
   };
 
   const uploadToQiniu = async (id: string) => {
@@ -842,7 +1048,7 @@ export function TemplatesPanel({
         ]
           .filter(Boolean)
           .join(" · "),
-        { id: key, duration: 8000 },
+        { id: key, duration: 8000 }
       );
       await load();
     } catch (e) {
@@ -856,7 +1062,7 @@ export function TemplatesPanel({
     const ids = [...selectedIds];
     if (ids.length === 0) {
       toast.warning(
-        action === "approve" ? "请先勾选要通过的模板" : "请先勾选要驳回的模板",
+        action === "approve" ? "请先勾选要通过的模板" : "请先勾选要驳回的模板"
       );
       return;
     }
@@ -907,9 +1113,13 @@ export function TemplatesPanel({
   const uploadSelected = () => {
     const ids = [...selectedIds];
     if (ids.length === 0) {
-      toast.warning("请先勾选要上传的模板");
+      toast.warning(
+        catalogTab === "live" ? "请先勾选要重传的模板" : "请先勾选要上传的模板"
+      );
       return;
     }
+    const isReupload = catalogTab === "live";
+    const operationLabel = isReupload ? "重传" : "上传";
     const selected = rows.filter((r) => ids.includes(r.id));
     const eligible = selected.filter((r) => r.status === "approved");
     const skipped = selected.filter((r) => r.status !== "approved");
@@ -919,12 +1129,14 @@ export function TemplatesPanel({
       return;
     }
     confirm({
-      title: `批量上传 ${eligible.length} 个模板到七牛？`,
+      title: `批量${operationLabel} ${eligible.length} 个模板到七牛？`,
       description: (
         <div>
           <p className="mb-2">
-            每个模板会先离屏截图、打本地压缩包，再上传七牛。缺 visual-spec
-            的会自动生成后再上传。
+            {isReupload
+              ? "将重新离屏截图、打本地压缩包，并覆盖七牛上的压缩包与预览图。"
+              : "每个模板会先离屏截图、打本地压缩包，再上传七牛。"}
+            缺 visual-spec 的会自动生成后再{operationLabel}。
           </p>
           {needSpec.length > 0 ? (
             <p className="mb-2 text-amber-700 dark:text-amber-300">
@@ -945,7 +1157,7 @@ export function TemplatesPanel({
           </p>
         </div>
       ),
-      okText: "开始上传",
+      okText: isReupload ? "开始重传" : "开始上传",
       onConfirm: async () => {
         setBusy({ id: eligible[0].id, action: "batch-upload" });
         const key = "batch-upload-qiniu";
@@ -960,7 +1172,7 @@ export function TemplatesPanel({
                 onProgress: (text) => {
                   toast.loading(
                     `[${i + 1}/${eligible.length}] ${row.label?.zh_CN || row.id} · ${text}`,
-                    { id: key },
+                    { id: key }
                   );
                 },
               });
@@ -973,17 +1185,17 @@ export function TemplatesPanel({
             }
           }
           if (failed.length === 0) {
-            toast.success(`批量上传完成：${ok} 个`, {
+            toast.success(`批量${operationLabel}完成：${ok} 个`, {
               id: key,
               duration: 6000,
             });
           } else {
             toast.warning(
-              `批量上传结束：成功 ${ok}，失败 ${failed.length}（${failed
+              `批量${operationLabel}结束：成功 ${ok}，失败 ${failed.length}（${failed
                 .slice(0, 3)
                 .map((f) => `${f.id}: ${f.error}`)
                 .join("；")}${failed.length > 3 ? "…" : ""}）`,
-              { id: key, duration: 10000 },
+              { id: key, duration: 10000 }
             );
           }
           setSelectedIds([]);
@@ -1048,7 +1260,7 @@ export function TemplatesPanel({
           .toLowerCase();
         return hay.includes(q);
       }),
-    [rows, catalogTab, search],
+    [rows, catalogTab, search]
   );
 
   const reviewCount = rows.filter(isReview).length;
@@ -1058,7 +1270,7 @@ export function TemplatesPanel({
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pageRows = filteredRows.slice(
     (tablePage - 1) * PAGE_SIZE,
-    tablePage * PAGE_SIZE,
+    tablePage * PAGE_SIZE
   );
 
   const pageIds = pageRows.map((r) => r.id);
@@ -1078,7 +1290,9 @@ export function TemplatesPanel({
 
   const toggleSelect = (id: string, checked: boolean) => {
     setSelectedIds((prev) =>
-      checked ? Array.from(new Set([...prev, id])) : prev.filter((x) => x !== id),
+      checked
+        ? Array.from(new Set([...prev, id]))
+        : prev.filter((x) => x !== id)
     );
   };
 
@@ -1145,16 +1359,75 @@ export function TemplatesPanel({
           </>
         ) : null}
         {catalogTab === "ready" || catalogTab === "live" ? (
-          <LoadingButton
-            variant={catalogTab === "live" ? "outline" : "default"}
-            loading={busy?.action === "batch-upload"}
-            disabled={selectedIds.length === 0 || Boolean(busy)}
-            onClick={uploadSelected}
-            title="需已通过；缺 visual-spec 会自动生成后再上传"
-          >
-            {catalogTab === "live" ? "批量重传" : "批量上传"}
-            {selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
-          </LoadingButton>
+          <>
+            <div className="flex items-center gap-2 rounded-md border bg-background px-2 py-1">
+              <span className="whitespace-nowrap text-xs font-medium text-muted-foreground">
+                Markdown 模型
+              </span>
+              <Select
+                value={markdownModel || undefined}
+                onValueChange={setMarkdownModel}
+                disabled={markdownModelsLoading || Boolean(busy)}
+              >
+                <SelectTrigger className="h-8 w-[320px]">
+                  <SelectValue
+                    placeholder={
+                      markdownModelsLoading ? "加载模型…" : "选择视觉模型"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {visionProviders.map((provider) => (
+                    <SelectGroup key={provider.id}>
+                      <SelectLabel>{provider.label}</SelectLabel>
+                      {provider.models.map((model) => (
+                        <SelectItem
+                          key={model.id}
+                          value={markdownModelValue(provider.id, model.id)}
+                        >
+                          {model.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {catalogTab === "live" || catalogTab === "ready" ? (
+              <LoadingButton
+                variant="outline"
+                loading={busy?.action === "batch-visual-spec"}
+                disabled={
+                  selectedIds.length === 0 ||
+                  Boolean(busy) ||
+                  !selectedMarkdownOption
+                }
+                onClick={batchGenerateVisualSpecs}
+                title={
+                  selectedMarkdownOption
+                    ? `使用 ${selectedMarkdownOption.provider.label} · ${selectedMarkdownOption.model.label} 批量生成`
+                    : "请先选择 Markdown 生成模型"
+                }
+              >
+                批量生成 Markdown
+                {selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
+              </LoadingButton>
+            ) : null}
+            <LoadingButton
+              variant={catalogTab === "live" ? "outline" : "default"}
+              loading={busy?.action === "batch-upload"}
+              disabled={selectedIds.length === 0 || Boolean(busy)}
+              onClick={uploadSelected}
+              title={
+                catalogTab === "live"
+                  ? "重新截图、打包并覆盖七牛文件；缺规范时自动生成"
+                  : "需已通过；缺 visual-spec 会自动生成后再上传"
+              }
+            >
+              {catalogTab === "live" ? "批量重传" : "批量上传"}
+              {selectedIds.length > 0 ? ` (${selectedIds.length})` : ""}
+            </LoadingButton>
+          </>
         ) : null}
         <LoadingButton
           variant="destructive"
@@ -1171,8 +1444,8 @@ export function TemplatesPanel({
           {catalogTab === "review"
             ? "通过后进入「已通过·待上传」"
             : catalogTab === "ready"
-              ? "生成规范并上传后，首页才可见"
-              : "已上七牛；可标记精选"}
+              ? "生成 Markdown 并上传后，首页才可见"
+              : "已上七牛；可批量生成 Markdown 或标记精选"}
         </span>
       </div>
 
@@ -1197,8 +1470,12 @@ export function TemplatesPanel({
                 <TableHead className="w-[240px]">名称</TableHead>
                 <TableHead className="w-[96px]">状态</TableHead>
                 <TableHead className="w-[64px] text-center">页数</TableHead>
-                <TableHead className="w-[118px] text-right">页面 Token</TableHead>
-                <TableHead className="w-[136px] text-right">图片 Token</TableHead>
+                <TableHead className="w-[118px] text-right">
+                  页面 Token
+                </TableHead>
+                <TableHead className="w-[136px] text-right">
+                  图片 Token
+                </TableHead>
                 <TableHead className="w-[88px]">存储</TableHead>
                 <TableHead className="w-[160px]">更新</TableHead>
                 <TableHead className="w-[460px]">操作</TableHead>
@@ -1273,14 +1550,15 @@ export function TemplatesPanel({
                   const imgs = row.imageCount ?? row.imageCalls;
                   const hasTokens = tokens != null && tokens > 0;
                   const costLabel = formatCny(row.imageCostCny);
-                  const imgLabel = imgs != null && imgs > 0 ? `${imgs}张` : null;
+                  const imgLabel =
+                    imgs != null && imgs > 0 ? `${imgs}张` : null;
 
                   return (
                     <TableRow
                       key={row.id}
                       className={cn(
                         highlightId === row.id &&
-                          "bg-orange-50/80 dark:bg-orange-950/50",
+                          "bg-orange-50/80 dark:bg-orange-950/50"
                       )}
                     >
                       <TableCell>
@@ -1299,7 +1577,7 @@ export function TemplatesPanel({
                             className={cn(
                               "truncate font-medium",
                               highlightId === row.id &&
-                                "rounded bg-orange-100/80 px-1 dark:bg-orange-900/50",
+                                "rounded bg-orange-100/80 px-1 dark:bg-orange-900/50"
                             )}
                           >
                             {row.label?.zh_CN || row.id}
@@ -1317,7 +1595,7 @@ export function TemplatesPanel({
                           <Select
                             value={coerceTemplateCategory(
                               row.category,
-                              categories,
+                              categories
                             )}
                             disabled={
                               rowBusy(row.id) && !isBusy(row.id, "category")
@@ -1345,8 +1623,26 @@ export function TemplatesPanel({
                           {templateStatusBadge(row.status)}
                           {templateRenderBadge(
                             row.render,
-                            row.htmlConvertFailed,
+                            row.htmlConvertFailed
                           )}
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[11px]",
+                              row.capacityStatus === "ready"
+                                ? "border-emerald-300 text-emerald-700 dark:text-emerald-300"
+                                : "border-amber-300 text-amber-700 dark:text-amber-300"
+                            )}
+                            title={
+                              row.capacityStatus === "ready"
+                                ? `容量契约已就绪，共 ${row.capacitySlots ?? 0} 个槽位`
+                                : `容量契约 ${row.capacityStatus || "missing"}；生成 Markdown 或使用模板时会自动编译`
+                            }
+                          >
+                            {row.capacityStatus === "ready"
+                              ? `容量 ${row.capacitySlots ?? 0}`
+                              : "容量待编译"}
+                          </Badge>
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
@@ -1480,7 +1776,7 @@ export function TemplatesPanel({
                             onClick={() =>
                               void exportPptx(
                                 row.id,
-                                row.label?.zh_CN || row.id,
+                                row.label?.zh_CN || row.id
                               )
                             }
                           >
@@ -1495,10 +1791,10 @@ export function TemplatesPanel({
                                 rowBusy(row.id) &&
                                 !isBusy(row.id, "visual-spec")
                               }
-                              title="调用 LLM 生成 / 覆盖 visual-spec.md"
+                              title="逐页结合整页预览与完整 HTML，生成 / 覆盖 visual-spec.md"
                               onClick={() => void generateVisualSpec(row.id)}
                             >
-                              生成规范
+                              生成 Markdown
                             </LoadingButton>
                           ) : null}
                           {showUpload ? (
@@ -1513,7 +1809,7 @@ export function TemplatesPanel({
                               }
                               title={
                                 canUpload
-                                  ? "缺 visual-spec 会先自动生成，再截图打包上传七牛"
+                                  ? "缺 Markdown 规范会先自动生成，再截图打包上传七牛"
                                   : "仅「已通过」可上传"
                               }
                               onClick={() => void uploadToQiniu(row.id)}
@@ -1661,7 +1957,7 @@ export function TemplatesPanel({
                         i === pageIndex
                           ? "bg-primary text-primary-foreground"
                           : "bg-foreground/5 text-foreground/70 hover:bg-foreground/10",
-                        rewriting && "opacity-50",
+                        rewriting && "opacity-50"
                       )}
                     >
                       {i + 1}
@@ -1677,7 +1973,9 @@ export function TemplatesPanel({
             <div className="space-y-3 border-t px-6 py-3">
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-medium">本页问题（可重写）</span>
+                  <span className="text-sm font-medium">
+                    本页问题（可重写）
+                  </span>
                   <span className="text-xs text-muted-foreground">
                     可改文案与版式，保留主题色与本地配图
                   </span>
@@ -1711,7 +2009,7 @@ export function TemplatesPanel({
                     }
                     onClick={() =>
                       setPageIndex((i) =>
-                        Math.min((preview?.pages.length || 1) - 1, i + 1),
+                        Math.min((preview?.pages.length || 1) - 1, i + 1)
                       )
                     }
                   >

@@ -71,14 +71,66 @@ def _attr_dict(attrs: list[tuple[str, str | None]]) -> dict[str, str]:
     return out
 
 
+# HTMLParser lowercases attribute names, but SVG attribute names are
+# case-sensitive: `viewbox` is ignored by browsers, which breaks scaling of every
+# decorative SVG. Restore the camelCase spelling when re-serializing.
+_SVG_CASE_ATTRS = {
+    "viewbox": "viewBox",
+    "preserveaspectratio": "preserveAspectRatio",
+    "gradientunits": "gradientUnits",
+    "gradienttransform": "gradientTransform",
+    "patternunits": "patternUnits",
+    "patterntransform": "patternTransform",
+    "patterncontentunits": "patternContentUnits",
+    "clippathunits": "clipPathUnits",
+    "maskunits": "maskUnits",
+    "maskcontentunits": "maskContentUnits",
+    "filterunits": "filterUnits",
+    "primitiveunits": "primitiveUnits",
+    "markerwidth": "markerWidth",
+    "markerheight": "markerHeight",
+    "markerunits": "markerUnits",
+    "refx": "refX",
+    "refy": "refY",
+    "textlength": "textLength",
+    "lengthadjust": "lengthAdjust",
+    "stddeviation": "stdDeviation",
+    "basefrequency": "baseFrequency",
+    "numoctaves": "numOctaves",
+    "stitchtiles": "stitchTiles",
+    "xchannelselector": "xChannelSelector",
+    "ychannelselector": "yChannelSelector",
+    "startoffset": "startOffset",
+    "pathlength": "pathLength",
+    "spreadmethod": "spreadMethod",
+    "diffuseconstant": "diffuseConstant",
+    "specularconstant": "specularConstant",
+    "specularexponent": "specularExponent",
+    "surfacescale": "surfaceScale",
+    "kernelmatrix": "kernelMatrix",
+    "kernelunitlength": "kernelUnitLength",
+    "targetx": "targetX",
+    "targety": "targetY",
+    "edgemode": "edgeMode",
+    "limitingconeangle": "limitingConeAngle",
+    "repeatcount": "repeatCount",
+    "keypoints": "keyPoints",
+    "keytimes": "keyTimes",
+    "keysplines": "keySplines",
+    "calcmode": "calcMode",
+    "attributename": "attributeName",
+}
+
+
 def _fmt_attrs(attrs: dict[str, str]) -> str:
     parts: list[str] = []
     for k, v in attrs.items():
+        name = _SVG_CASE_ATTRS.get(k, k)
         if v == "":
-            parts.append(k)
+            parts.append(name)
         else:
             esc = v.replace("&", "&amp;").replace('"', "&quot;")
-            parts.append(f'{k}="{esc}"')
+            parts.append(f'{name}="{esc}"')
     return (" " + " ".join(parts)) if parts else ""
 
 
@@ -246,10 +298,15 @@ def _collect(
 ) -> None:
     if node.kind != "tag":
         return
+    # slot_tree marked this subtree layout-only (row index column): never slot it,
+    # and never descend — its inner absolute wrapper would be picked otherwise.
+    if node.attrs.get("data-slot-static"):
+        return
     cur_path = path + [node]
     if node.tag == "img" and not _has_attr_slot(node) and not _ancestor_has_slot(path):
         img_cands.append(node)
-    # absolute text boxes: skip if self/ancestor/descendant already slotted
+    # absolute text boxes: skip if self/ancestor/descendant already slotted,
+    # or if slot_tree marked it as layout-only (row index column) on purpose.
     if (
         node.tag == "div"
         and _style_pos_absolute(node)

@@ -14,9 +14,24 @@ def get_llm():
     from admin.providers import (
         list_image_providers_public,
         list_llm_providers_public,
+        list_vision_providers_public,
+        resolve_vision_selection,
     )
+
+    vision_providers = list_vision_providers_public()
+    try:
+        selected = resolve_vision_selection()
+        vision_default = {
+            "provider": selected["provider"],
+            "model": selected["model"],
+            "label": selected["label"],
+        }
+    except RuntimeError:
+        vision_default = None
 
     return {
         "providers": list_llm_providers_public(),
         "imageProviders": list_image_providers_public(),
+        "visionProviders": vision_providers,
+        "visionDefault": vision_default,
     }

@@ -60,7 +60,7 @@ cp .env.example .env.local
 
 也会读取 `backend/.env`（会覆盖同名变量）。
 
-### 3. 后端 API（`:8787`）
+### 3. 后端 API（`:8790`）
 
 ```bash
 cd backend
@@ -95,7 +95,7 @@ npm run dev
 | `/admin` | 管理后台 |
 | `/templates` | 本地模板库 |
 
-Vite 将 `/api/*`、`/embed/*` 代理到 `GALLERY_API_URL`（默认 `http://127.0.0.1:8787`）。
+Vite 将 `/api/*`、`/embed/*` 代理到 `GALLERY_API_URL`（默认 `http://127.0.0.1:8790`）。
 
 <details>
 <summary>环境变量说明（节选）</summary>
@@ -155,7 +155,7 @@ npm run preview    # 预览生产构建（同端口策略见 vite 配置）
 ```bash
 ai-prept-backend doctor              # 检查 LLM 配置
 ai-prept-backend gallery-sync        # 从磁盘同步模板到 Postgres
-ai-prept-backend serve               # API :8787（同 gallery-serve）
+ai-prept-backend serve               # API :8790（同 gallery-serve）
 ai-prept-backend remix-template ...  # 基于源模板套用内容
 ai-prept-backend ppt-master ...      # PPT Master 生成管线
 ai-prept-backend styles-catalog      # 风格卡目录

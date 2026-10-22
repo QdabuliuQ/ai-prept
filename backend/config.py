@@ -236,6 +236,107 @@ def llm_light_config() -> LlmConfig:
     return llm_config()
 
 
+def llm_vision_config() -> LlmConfig:
+    """Vision-capable LLM for visual-spec analysis.
+
+    Explicit ``LLM_VISION_*`` wins. If unrelated vision-capable provider keys are
+    present, prefer Gemini and otherwise the regular main-line configuration.
+    Set ``LLM_VISION_SAME=1`` to force the main LLM.
+    """
+    if _truthy("LLM_VISION_SAME"):
+        return llm_config()
+
+    provider = (os.environ.get("LLM_VISION_PROVIDER") or "").strip().lower()
+    provider_keys: tuple[str, ...] = ()
+    provider_base = ""
+    provider_model = ""
+    if provider == "gemini":
+        provider_keys = parse_api_keys(
+            os.environ.get("GEMINI_API_KEYS"),
+            os.environ.get("GEMINI_API_KEY"),
+            os.environ.get("GOOGLE_API_KEYS"),
+            os.environ.get("GOOGLE_API_KEY"),
+            os.environ.get("GOOGLE_AI_API_KEYS"),
+            os.environ.get("GOOGLE_AI_API_KEY"),
+        )
+        provider_base = (
+            os.environ.get("GEMINI_BASE_URL")
+            or os.environ.get("GOOGLE_AI_BASE_URL")
+            or "https://generativelanguage.googleapis.com/v1beta/openai/"
+        )
+        provider_model = os.environ.get("GEMINI_MODEL") or "gemini-3.8-flash"
+    elif provider == "workbuddy":
+        provider_keys = parse_api_keys(
+            os.environ.get("WORKBUDDY_API_KEYS"),
+            os.environ.get("WORKBUDDY_API_KEY"),
+        )
+        provider_base = (
+            os.environ.get("WORKBUDDY_BASE_URL") or "http://127.0.0.1:3000/v1"
+        )
+        provider_model = "glm-5v-turbo"
+
+    vision_keys = parse_api_keys(
+        os.environ.get("LLM_VISION_API_KEYS"),
+        os.environ.get("LLM_VISION_API_KEY"),
+    ) or provider_keys
+    if vision_keys:
+        try:
+            main = llm_config()
+        except RuntimeError:
+            main = None
+        return LlmConfig(
+            api_keys=vision_keys,
+            base_url=(
+                os.environ.get("LLM_VISION_BASE_URL")
+                or provider_base
+                or os.environ.get("OPENAI_BASE_URL")
+                or (main.base_url if main else "https://api.deepseek.com")
+            ).rstrip("/"),
+            model=(
+                os.environ.get("LLM_VISION_MODEL")
+                or provider_model
+                or (main.model if main else "deepseek-v4-flash")
+            ).strip(),
+            timeout_s=_env_float(
+                "LLM_VISION_TIMEOUT", main.timeout_s if main else 180.0
+            ),
+            max_retries=_env_int(
+                "LLM_SDK_RETRIES", main.max_retries if main else 1, lo=0, hi=5
+            ),
+            attempts=_env_int(
+                "LLM_ATTEMPTS", main.attempts if main else 3, lo=1, hi=12
+            ),
+        )
+
+    gemini_keys = parse_api_keys(
+        os.environ.get("GEMINI_API_KEYS"),
+        os.environ.get("GEMINI_API_KEY"),
+        os.environ.get("GOOGLE_API_KEYS"),
+        os.environ.get("GOOGLE_API_KEY"),
+        os.environ.get("GOOGLE_AI_API_KEYS"),
+        os.environ.get("GOOGLE_AI_API_KEY"),
+    )
+    if gemini_keys:
+        return LlmConfig(
+            api_keys=gemini_keys,
+            base_url=(
+                os.environ.get("GEMINI_BASE_URL")
+                or os.environ.get("GOOGLE_AI_BASE_URL")
+                or "https://generativelanguage.googleapis.com/v1beta/openai/"
+            ).rstrip("/"),
+            model=(
+                os.environ.get("LLM_VISION_MODEL")
+                or os.environ.get("GEMINI_MODEL")
+                or "gemini-3.8-flash"
+            ).strip(),
+            timeout_s=_env_float("LLM_VISION_TIMEOUT", 180.0),
+            max_retries=_env_int("LLM_SDK_RETRIES", 1, lo=0, hi=5),
+            attempts=_env_int("LLM_ATTEMPTS", 3, lo=1, hi=12),
+        )
+
+    return llm_config()
+
+
 def default_output_root() -> Path:
     """模板直接写到仓库根下 agent-output/<id>/。"""
     return _repo_root() / "agent-output"

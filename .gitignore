@@ -27,6 +27,8 @@ ppt-master/
 dist
 *.log
 .DS_Store
+.cursor/
+.shot-*.png
 
 # Env
 .env

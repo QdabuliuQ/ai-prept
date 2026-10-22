@@ -219,6 +219,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="标记为临时会话包（首页 remix：写 sessions/，不进模板库）",
     )
+    rx.add_argument(
+        "--render-check",
+        action="store_true",
+        help="生成后用真实浏览器（Chrome headless / Playwright）实测文字溢出并记入 warning",
+    )
 
     rw = sub.add_parser(
         "rewrite-page",
@@ -333,6 +338,41 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="可选：写入 JSON 报告（数组）",
+    )
+
+    rc = sub.add_parser(
+        "render-check",
+        help="用真实浏览器实测模板包文字溢出/出画（Chrome headless 或 Playwright）",
+    )
+    rc.add_argument("package", type=Path, help="模板包目录")
+    rc.add_argument(
+        "--engine",
+        choices=["auto", "playwright", "chrome"],
+        default="auto",
+        help="实测引擎（默认 auto：优先 playwright，回退本机 Chrome）",
+    )
+    rc.add_argument(
+        "--json",
+        type=Path,
+        default=None,
+        help="可选：把结果写成 JSON",
+    )
+
+    cap = sub.add_parser(
+        "capacity",
+        help="编译模板槽位、行列字段与安全字数契约（capacity.json）",
+    )
+    cap.add_argument("package", type=Path, help="模板包目录")
+    cap.add_argument(
+        "--render-baseline",
+        action="store_true",
+        help="同时用真实浏览器记录源模板基线溢出",
+    )
+    cap.add_argument(
+        "--json",
+        type=Path,
+        default=None,
+        help="可选：把完整契约写成 JSON",
     )
 
     sub.add_parser("doctor", help="检查 LLM 配置是否可用")
@@ -579,6 +619,60 @@ def _cmd_ensure_style(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_render_check(args: argparse.Namespace) -> int:
+    from templates.render_check import check_package_render
+
+    package = Path(args.package).expanduser().resolve()
+    prefer = "auto" if args.engine == "auto" else str(args.engine)
+    result = check_package_render(package, prefer=prefer)
+    issues = result.get("issues") or []
+    print(
+        f"[render-check] engine={result.get('engine')} pages={result.get('pages')} "
+        f"issues={len(issues)}"
+    )
+    if result.get("error"):
+        print(f"[render-check] note: {result['error']}", file=sys.stderr)
+    for item in issues[:60]:
+        print(
+            f"  - {item.get('file')}#{item.get('slot')} {item.get('reason')} "
+            f"{str(item.get('text') or '')[:48]}"
+        )
+    if args.json:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[report] {args.json}")
+    return 0 if not issues else 1
+
+
+def _cmd_capacity(args: argparse.Namespace) -> int:
+    from templates.capacity import build_capacity_contract
+
+    package = Path(args.package).expanduser().resolve()
+    result = build_capacity_contract(
+        package,
+        render_baseline=bool(args.render_baseline),
+    )
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    print(
+        f"[capacity] status={result.get('status')} pages={summary.get('pages', 0)} "
+        f"slots={summary.get('slots', 0)} text={summary.get('text_slots', 0)} "
+        f"rows={summary.get('rows', 0)}"
+    )
+    for issue in (result.get("issues") or [])[:30]:
+        print(f"  - {issue.get('file')}#{issue.get('slot')} {issue.get('code')}")
+    if args.json:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(
+            json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        print(f"[report] {args.json}")
+    return 0 if result.get("status") == "ready" else 1
+
+
 def _cmd_remix_template(args: argparse.Namespace) -> int:
     from templates.remix import run_remix
 
@@ -602,6 +696,7 @@ def _cmd_remix_template(args: argparse.Namespace) -> int:
             skip_images=skip_images,
             status=str(getattr(args, "status", None) or "pending"),
             ephemeral=bool(getattr(args, "ephemeral", False)),
+            render_check=bool(getattr(args, "render_check", False)),
             log=lambda s: print(s, end="" if s.endswith("\n") else "\n", flush=True),
         )
     except Exception as e:
@@ -840,6 +935,10 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_ensure_style(args)
     if args.command == "remix-template":
         return _cmd_remix_template(args)
+    if args.command == "render-check":
+        return _cmd_render_check(args)
+    if args.command == "capacity":
+        return _cmd_capacity(args)
     if args.command == "rewrite-page":
         return _cmd_rewrite_page(args)
     if args.command == "generate-page":

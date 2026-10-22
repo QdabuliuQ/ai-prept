@@ -6,17 +6,23 @@ to ground the design bible in observed pages — not meta descriptions alone.
 
 from __future__ import annotations
 
+import base64
 import json
 import re
+import tempfile
+from contextlib import contextmanager
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from config import llm_light_config
-from llm import chat_text, make_client_pool
+from config import LlmConfig, llm_light_config, llm_vision_config
+from llm import chat_json, chat_text, make_client_pool
 from templates import prompts
 from templates.page_rewrite import list_image_files
 from templates.remix import inventory_slide_slots
+from templates.render_check import capture_package_previews
+from templates.slot_tree import canvas_size, measure_slots
 from usage import track_usage, use_usage
 
 _HEX_RE = re.compile(r"#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b")
@@ -24,12 +30,12 @@ _RADIUS_RE = re.compile(r"border-radius\s*:\s*([^;}\"']+)", re.I)
 _FONT_SIZE_RE = re.compile(r"font-size\s*:\s*([^;}\"']+)", re.I)
 
 # Token budget: fingerprints for all pages + a few HTML excerpts.
-_THEME_EXCERPT_CHARS = 4_000
 _HTML_EXCERPT_CHARS = 2_500
 _MAX_SLOTS_PER_PAGE = 20
 _MAX_MOTIF_SAMPLES = 12
 _DESC_CHARS = 180
 _SLOT_TEXT_CHARS = 80
+_PREVIEW_SUFFIXES = {".webp", ".png", ".jpg", ".jpeg"}
 
 
 def _strip_fence(text: str) -> str:
@@ -141,6 +147,315 @@ def _page_fingerprint(
     }
 
 
+def _preview_type(path: Path) -> str:
+    suffix = path.suffix.lower()
+    if suffix == ".webp":
+        return "image/webp"
+    if suffix == ".jpg" or suffix == ".jpeg":
+        return "image/jpeg"
+    return "image/png"
+
+
+def _image_data_url(path: Path) -> str:
+    data = path.read_bytes()
+    return f"data:{_preview_type(path)};base64,{base64.b64encode(data).decode('ascii')}"
+
+
+def _visual_slots(html: str, *, file: str) -> list[dict[str, Any]]:
+    """Complete slot facts used by the per-page multimodal analyzer."""
+    rows: list[dict[str, Any]] = []
+    for slot in inventory_slide_slots(html, file=file):
+        row = {
+            key: slot.get(key)
+            for key in (
+                "slot",
+                "type",
+                "role",
+                "current",
+                "src",
+                "filename",
+                "font_px",
+                "abs_left",
+                "abs_top",
+                "box_width_px",
+                "box_height_px",
+                "line_count",
+                "fields",
+            )
+            if slot.get(key) not in (None, "", [])
+        }
+        rows.append(row)
+    return rows
+
+
+def overlap_candidates(html: str, *, file: str) -> list[dict[str, Any]]:
+    """Return every materially overlapping text pair as evidence, not a verdict."""
+    boxes = measure_slots(html)
+    text_slots = [
+        slot
+        for slot in inventory_slide_slots(html, file=file)
+        if slot.get("type") == "text" and str(slot.get("slot") or "") in boxes
+    ]
+    pairs: list[dict[str, Any]] = []
+    for index, left in enumerate(text_slots):
+        left_box = boxes[str(left["slot"])]
+        lx = float(left_box.get("x") or 0)
+        ly = float(left_box.get("y") or 0)
+        lw = float(left_box.get("width") or 0)
+        lh = float(left_box.get("height") or 0)
+        if lw <= 0 or lh <= 0:
+            continue
+        for right in text_slots[index + 1 :]:
+            right_box = boxes[str(right["slot"])]
+            rx = float(right_box.get("x") or 0)
+            ry = float(right_box.get("y") or 0)
+            rw = float(right_box.get("width") or 0)
+            rh = float(right_box.get("height") or 0)
+            if rw <= 0 or rh <= 0:
+                continue
+            overlap_w = max(0.0, min(lx + lw, rx + rw) - max(lx, rx))
+            overlap_h = max(0.0, min(ly + lh, ry + rh) - max(ly, ry))
+            overlap_area = overlap_w * overlap_h
+            smaller = min(lw * lh, rw * rh)
+            ratio = overlap_area / smaller if smaller > 0 else 0.0
+            if ratio < 0.08:
+                continue
+            left_text = re.sub(r"\s+", " ", str(left.get("current") or "")).strip()
+            right_text = re.sub(r"\s+", " ", str(right.get("current") or "")).strip()
+            pairs.append(
+                {
+                    "slots": [left["slot"], right["slot"]],
+                    "overlap_ratio_of_smaller": round(ratio, 3),
+                    "offset_px": {
+                        "x": round(rx - lx, 1),
+                        "y": round(ry - ly, 1),
+                    },
+                    "same_text": bool(left_text and left_text == right_text),
+                    "text_lengths": [len(left_text), len(right_text)],
+                }
+            )
+    pairs.sort(key=lambda row: float(row["overlap_ratio_of_smaller"]), reverse=True)
+    return pairs[:80]
+
+
+def _page_records(package_dir: Path, deck: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for page in deck.get("pages") or []:
+        if not isinstance(page, dict) or page.get("missing"):
+            continue
+        rel = str(page.get("file") or "").strip()
+        path = package_dir / rel
+        if not path.is_file():
+            continue
+        html = path.read_text(encoding="utf-8")
+        width, height = canvas_size(html)
+        rows.append(
+            {
+                "file": rel,
+                "path": path,
+                "html": html,
+                "layout": page.get("layout"),
+                "sample_title": page.get("sample_title"),
+                "sample_description": page.get("sample_description"),
+                "canvas": {"width": round(width, 1), "height": round(height, 1)},
+                "slots": _visual_slots(html, file=rel),
+                "overlap_candidates": overlap_candidates(html, file=rel),
+            }
+        )
+    return rows
+
+
+def _fresh_existing_previews(
+    package_dir: Path,
+    pages: list[dict[str, Any]],
+) -> list[Path] | None:
+    preview_dir = package_dir / "previews"
+    if not preview_dir.is_dir():
+        return None
+    previews = sorted(
+        path
+        for path in preview_dir.iterdir()
+        if path.is_file() and path.suffix.lower() in _PREVIEW_SUFFIXES
+    )
+    if len(previews) < len(pages):
+        return None
+    previews = previews[: len(pages)]
+    source_paths = [Path(page["path"]) for page in pages]
+    theme = package_dir / "theme.css"
+    if theme.is_file():
+        source_paths.append(theme)
+    try:
+        newest_source = max(path.stat().st_mtime_ns for path in source_paths)
+        oldest_preview = min(path.stat().st_mtime_ns for path in previews)
+    except OSError:
+        return None
+    return previews if oldest_preview >= newest_source else None
+
+
+@contextmanager
+def _page_preview_paths(
+    package_dir: Path,
+    pages: list[dict[str, Any]],
+) -> Iterator[list[Path]]:
+    fresh = _fresh_existing_previews(package_dir, pages)
+    if fresh is not None:
+        yield fresh
+        return
+    with tempfile.TemporaryDirectory(prefix="ai-prept-visual-spec-") as tmp:
+        yield capture_package_previews(
+            package_dir,
+            tmp,
+            page_paths=[Path(page["path"]) for page in pages],
+        )
+
+
+def _vision_user_content(
+    *,
+    intro: str,
+    prompt: str,
+    image_paths: list[Path],
+) -> list[dict[str, Any]]:
+    content: list[dict[str, Any]] = [{"type": "text", "text": intro}]
+    for index, path in enumerate(image_paths, start=1):
+        content.append(
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": _image_data_url(path),
+                    "detail": "high",
+                },
+            }
+        )
+        content.append(
+            {
+                "type": "text",
+                "text": f"上图编号 {index:02d}：{path.name}",
+            }
+        )
+    content.append({"type": "text", "text": prompt})
+    return content
+
+
+def _analyze_page_with_vision(
+    *,
+    pool: Any,
+    cfg: LlmConfig,
+    page: dict[str, Any],
+    preview: Path,
+) -> dict[str, Any]:
+    page_context = {
+        "file": page["file"],
+        "layout": page.get("layout"),
+        "sample_title": page.get("sample_title"),
+        "sample_description": page.get("sample_description"),
+        "canvas": page.get("canvas"),
+        "slots": page.get("slots"),
+        "full_html": page.get("html"),
+        "content_note": "sample_title / sample_description 与页面文案是原模板样例内容。",
+    }
+    user_prompt = prompts.user_page_visual_analysis(
+        page_context=json.dumps(page_context, ensure_ascii=False, separators=(",", ":")),
+        overlap_evidence=json.dumps(
+            page.get("overlap_candidates") or [],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+    )
+    raw = chat_json(
+        pool=pool,
+        model=cfg.model,
+        messages=[
+            {"role": "system", "content": prompts.SYSTEM_PAGE_VISUAL_ANALYSIS},
+            {
+                "role": "user",
+                "content": _vision_user_content(
+                    intro="下面是这一页的整页渲染预览。它必须与后面的完整 HTML 对照分析。",
+                    prompt=user_prompt,
+                    image_paths=[preview],
+                ),
+            },
+        ],
+        temperature=0.2,
+    )
+    raw["file"] = page["file"]
+    return raw
+
+
+def _deck_vision_context(
+    deck: dict[str, Any],
+    page_analyses: list[dict[str, Any]],
+) -> str:
+    return json.dumps(
+        {
+            "template_id": deck.get("template_id"),
+            "label": deck.get("label"),
+            "description": deck.get("description"),
+            "format": deck.get("format"),
+            "page_count": len(page_analyses),
+            "theme_css": deck.get("theme_css_excerpt"),
+            "content_note": deck.get("content_note"),
+            "pages": page_analyses,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _generate_visual_spec_with_vision(
+    root: Path,
+    deck: dict[str, Any],
+    vision_config: LlmConfig | None = None,
+    synthesis_config: LlmConfig | None = None,
+) -> str:
+    pages = _page_records(root, deck)
+    if not pages:
+        raise RuntimeError("模板包没有可分析的 slides/*.html")
+
+    cfg = vision_config or llm_vision_config()
+    pool = make_client_pool(cfg)
+    with track_usage() as usage:
+        with use_usage(usage):
+            with _page_preview_paths(root, pages) as previews:
+                if len(previews) != len(pages):
+                    raise RuntimeError(
+                        f"页面预览数量不符：HTML {len(pages)} 页，预览 {len(previews)} 页"
+                    )
+                analyses = [
+                    _analyze_page_with_vision(
+                        pool=pool,
+                        cfg=cfg,
+                        page=page,
+                        preview=preview,
+                    )
+                    for page, preview in zip(pages, previews)
+                ]
+
+    synthesis_cfg = synthesis_config or llm_light_config()
+    synthesis_pool = make_client_pool(synthesis_cfg)
+    with track_usage() as usage:
+        with use_usage(usage):
+            raw = chat_text(
+                pool=synthesis_pool,
+                model=synthesis_cfg.model,
+                messages=[
+                    {"role": "system", "content": prompts.SYSTEM_VISUAL_SPEC},
+                    {
+                        "role": "user",
+                        "content": prompts.user_deck_visual_spec(
+                            deck_json=_deck_vision_context(deck, analyses),
+                            page_analyses_json=json.dumps(
+                                analyses,
+                                ensure_ascii=False,
+                                separators=(",", ":"),
+                            ),
+                        ),
+                    },
+                ],
+                temperature=0.35,
+            )
+    return _strip_fence(raw)
+
+
 def _pick_excerpt_indices(n: int) -> list[tuple[str, int]]:
     """Label + index for cover / sample-content / closing (deduped by index)."""
     if n <= 0:
@@ -184,7 +499,7 @@ def build_deck_context(package_dir: Path) -> dict[str, Any]:
     theme_path = package_dir / theme_rel
     theme_excerpt = ""
     if theme_path.is_file():
-        theme_excerpt = theme_path.read_text(encoding="utf-8")[:_THEME_EXCERPT_CHARS]
+        theme_excerpt = theme_path.read_text(encoding="utf-8")
 
     pages: list[dict[str, Any]] = []
     html_by_index: list[tuple[str, str]] = []  # (file, html)
@@ -287,6 +602,8 @@ def generate_visual_spec(
     *,
     mock: bool = False,
     only_if_missing: bool = False,
+    vision_config: LlmConfig | None = None,
+    synthesis_config: LlmConfig | None = None,
 ) -> Path:
     """Read slide pages, call LLM (or mock stub), write visual-spec.md."""
     root = package_dir.resolve()
@@ -302,8 +619,6 @@ def generate_visual_spec(
             pass
 
     deck = build_deck_context(root)
-    # Compact separators: fingerprints + excerpts already carry the signal.
-    deck_json = json.dumps(deck, ensure_ascii=False, separators=(",", ":"))
 
     if mock:
         label = ""
@@ -347,16 +662,12 @@ def generate_visual_spec(
         )
         return write_visual_spec(root, md)
 
-    # visual-spec is a documentation task; use the light tier when configured.
-    cfg = llm_light_config()
-    pool = make_client_pool(cfg)
-    with track_usage() as usage:
-        with use_usage(usage):
-            raw = chat_text(
-                pool=pool,
-                model=cfg.model,
-                system=prompts.SYSTEM_VISUAL_SPEC,
-                user=prompts.user_visual_spec(deck_json=deck_json),
-                temperature=0.35,
-            )
-    return write_visual_spec(root, _strip_fence(raw))
+    return write_visual_spec(
+        root,
+        _generate_visual_spec_with_vision(
+            root,
+            deck,
+            vision_config=vision_config,
+            synthesis_config=synthesis_config,
+        ),
+    )

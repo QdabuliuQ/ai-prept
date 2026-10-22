@@ -24,6 +24,9 @@ ALLOWED_IMAGE_SIZES = frozenset(
     {"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"}
 )
 
+# Agnes Image 使用分辨率档位 + ratio，而不是 OpenAI 的单值 size。
+ALLOWED_AGNES_RESOLUTIONS = frozenset({"1K", "2K", "3K", "4K"})
+
 # 占位图近似像素（与比例一致即可）
 ASPECT_PLACEHOLDER_PX: dict[str, tuple[int, int]] = {
     "1:1": (1024, 1024),
@@ -272,6 +275,8 @@ def image_api_config() -> ImageApiConfig:
             transport = "pollinations-get"
         elif provider == "siliconflow":
             transport = "siliconflow-images"
+        elif provider == "agnes":
+            transport = "agnes-images"
         else:
             transport = "openai-images"
     # 已配置 IMAGE_* 时不再合并 OPENAI_API_KEY，避免 IDE/shell 里过期兜底 key 污染轮询池。
@@ -280,6 +285,14 @@ def image_api_config() -> ImageApiConfig:
         dedicated = parse_api_keys(
             os.environ.get("SILICONFLOW_API_KEYS"),
             os.environ.get("SILICONFLOW_API_KEY"),
+        ) or parse_api_keys(
+            os.environ.get("IMAGE_API_KEYS"),
+            os.environ.get("IMAGE_API_KEY"),
+        )
+    elif provider == "agnes" or transport == "agnes-images":
+        dedicated = parse_api_keys(
+            os.environ.get("AGNES_API_KEYS"),
+            os.environ.get("AGNES_API_KEY"),
         ) or parse_api_keys(
             os.environ.get("IMAGE_API_KEYS"),
             os.environ.get("IMAGE_API_KEY"),
@@ -301,15 +314,25 @@ def image_api_config() -> ImageApiConfig:
         default_base = "https://gen.pollinations.ai"
     elif transport == "siliconflow-images":
         default_base = "https://api.siliconflow.cn/v1"
+    elif transport == "agnes-images":
+        default_base = "https://apihub.agnes-ai.com/v1"
     img_base = (os.environ.get("IMAGE_API_BASE_URL") or "").strip().rstrip("/")
     poll_base = (os.environ.get("POLLINATIONS_BASE_URL") or "").strip().rstrip("/")
     openai_base = (os.environ.get("OPENAI_BASE_URL") or "").strip().rstrip("/")
     sf_base = (os.environ.get("SILICONFLOW_BASE_URL") or "").strip().rstrip("/")
+    agnes_base = (os.environ.get("AGNES_BASE_URL") or "").strip().rstrip("/")
     if transport == "siliconflow-images":
         # 勿被 Maizi/OpenAI 的 IMAGE_API_BASE_URL 覆盖；仅接受显式硅基流动地址
         if sf_base:
             base = sf_base
         elif img_base and "siliconflow" in img_base.lower():
+            base = img_base
+        else:
+            base = default_base
+    elif transport == "agnes-images":
+        if agnes_base:
+            base = agnes_base
+        elif img_base and "agnes" in img_base.lower():
             base = img_base
         else:
             base = default_base
@@ -322,6 +345,8 @@ def image_api_config() -> ImageApiConfig:
         default_model = "flux"
     elif transport == "siliconflow-images":
         default_model = "Tongyi-MAI/Z-Image-Turbo"
+    elif transport == "agnes-images":
+        default_model = "agnes-image-2.5-flash"
     else:
         default_model = "nano-banana-fast"
     model = (os.environ.get("IMAGE_MODEL") or default_model).strip()
@@ -334,7 +359,12 @@ def image_api_config() -> ImageApiConfig:
         size = normalize_image_size(env_size)
     else:
         size = "16:9"
-    needs_key = transport in {"openai-images", "pollinations-get", "siliconflow-images"}
+    needs_key = transport in {
+        "openai-images",
+        "pollinations-get",
+        "siliconflow-images",
+        "agnes-images",
+    }
     return ImageApiConfig(
         api_keys=keys,
         base_url=base,
@@ -1276,6 +1306,112 @@ def aspect_to_siliconflow_image_size(aspect: str) -> str:
     return f"{w}x{h}"
 
 
+def normalize_agnes_resolution(raw: str | None, *, default: str = "1K") -> str:
+    """Normalize Agnes resolution tiers; unsupported values fall back safely."""
+    text = (raw or "").strip().upper()
+    aliases = {
+        "1024": "1K",
+        "1024PX": "1K",
+        "2048": "2K",
+        "2048PX": "2K",
+        "3072": "3K",
+        "3072PX": "3K",
+        "4096": "4K",
+        "4096PX": "4K",
+    }
+    text = aliases.get(text, text)
+    fallback = default.strip().upper()
+    if fallback not in ALLOWED_AGNES_RESOLUTIONS:
+        fallback = "1K"
+    return text if text in ALLOWED_AGNES_RESOLUTIONS else fallback
+
+
+def generate_image_bytes_agnes(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    prompt: str,
+    size: str,
+    timeout_s: float = 180.0,
+) -> bytes:
+    """POST /v1/images/generations using Agnes size tier + ratio fields."""
+    root = base_url.rstrip("/")
+    if not root.endswith("/v1"):
+        root = f"{root}/v1"
+    url = f"{root}/images/generations"
+    resolution = normalize_agnes_resolution(
+        os.environ.get("IMAGE_RESOLUTION")
+        or os.environ.get("IMAGE_AGNES_SIZE")
+    )
+    payload = {
+        "model": model or "agnes-image-2.5-flash",
+        "prompt": prompt,
+        "size": resolution,
+        "ratio": normalize_image_size(size),
+        "extra_body": {"response_format": "url"},
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=int(timeout_s)) as r:  # noqa: S310
+            raw = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        err_body = ""
+        try:
+            err_body = e.read().decode("utf-8", errors="replace")[:500]
+        except Exception:
+            pass
+        raise RuntimeError(
+            f"Agnes 生图失败 HTTP {e.code}: {err_body or e.reason}"
+        ) from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Agnes 生图连接失败: {e.reason}") from e
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        raise RuntimeError(f"Agnes 生图返回了无效 JSON: {e}") from e
+
+    data_items = raw.get("data") if isinstance(raw, dict) else None
+    if not isinstance(data_items, list) or not data_items:
+        error = raw.get("error") if isinstance(raw, dict) else None
+        raise RuntimeError(f"Agnes 未返回图片数据: {error or str(raw)[:400]}")
+
+    for item in data_items:
+        if not isinstance(item, dict):
+            continue
+        b64 = item.get("b64_json")
+        if isinstance(b64, str) and b64.strip():
+            if "," in b64[:64]:
+                b64 = b64.split(",", 1)[1]
+            try:
+                data = base64.b64decode(b64)
+            except (ValueError, TypeError) as e:
+                raise RuntimeError("Agnes 返回的 Base64 图片无效") from e
+            from usage import record_image_usage
+
+            record_image_usage(None, images=1)
+            return data
+
+        image_url = item.get("url")
+        if isinstance(image_url, str) and image_url.strip():
+            data = _download(image_url.strip(), timeout=int(timeout_s))
+            if sniff_image_suffix(data) is None:
+                preview = data[:120].decode("utf-8", errors="replace")
+                raise RuntimeError(f"Agnes 图片 URL 未返回图片字节: {preview}")
+            from usage import record_image_usage
+
+            record_image_usage(None, images=1)
+            return data
+
+    raise RuntimeError(f"Agnes 未返回 url/b64_json: {str(raw)[:400]}")
+
+
 def generate_image_bytes_siliconflow(
     *,
     base_url: str,
@@ -1460,6 +1596,15 @@ def generate_image_bytes(
             size=size,
             timeout_s=timeout_s,
         )
+    if transport == "agnes-images":
+        return generate_image_bytes_agnes(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            prompt=prompt,
+            size=size,
+            timeout_s=timeout_s,
+        )
     if transport == "siliconflow-images":
         data = generate_image_bytes_siliconflow(
             base_url=base_url,
@@ -1616,7 +1761,8 @@ def materialize_images(
     key_ring: list[str] = list(cfg.api_keys)
     use_pollinations = cfg.transport == "pollinations-get"
     use_siliconflow = cfg.transport == "siliconflow-images"
-    use_http_only = use_pollinations or use_siliconflow
+    use_agnes = cfg.transport == "agnes-images"
+    use_http_only = use_pollinations or use_siliconflow or use_agnes
     if not cfg.skip:
         if use_pollinations:
             if not key_ring:
@@ -1632,6 +1778,14 @@ def materialize_images(
             else:
                 print(
                     f"文生图后端: SiliconFlow · model={cfg.model} · {cfg.base_url}",
+                    flush=True,
+                )
+        elif use_agnes:
+            if not key_ring:
+                warnings.append("Agnes 未配置 AGNES_/IMAGE_ API Key，改用占位图")
+            else:
+                print(
+                    f"文生图后端: Agnes AI · model={cfg.model} · {cfg.base_url}",
                     flush=True,
                 )
         else:

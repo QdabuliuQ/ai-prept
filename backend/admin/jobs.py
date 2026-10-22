@@ -1027,6 +1027,18 @@ def start_remix_job(options: dict[str, Any]) -> dict[str, Any]:
     spec = source / "visual-spec.md"
     if not spec.is_file() or not spec.read_text(encoding="utf-8").strip():
         raise RuntimeError("源模板缺少 visual-spec.md，请先生成设计规范后再使用模板")
+    try:
+        from templates.capacity import ensure_capacity_contract
+
+        contract = ensure_capacity_contract(source)
+        if contract.get("status") != "ready":
+            raise RuntimeError(
+                "模板容量契约未通过结构校验，请先修复模板或重新生成规范"
+            )
+    except RuntimeError:
+        raise
+    except Exception as exc:
+        raise RuntimeError(f"无法生成模板容量契约：{exc}") from exc
 
     mock = bool(options.get("mock"))
     skip_image = options.get("skipImage") is not False
@@ -1086,6 +1098,8 @@ def start_remix_job(options: dict[str, Any]) -> dict[str, Any]:
         args.append("--skip-image")
     else:
         args.append("--with-images")
+    # UI/API 生成始终做真实浏览器验收；容量不足时自动重写一次并安全回退。
+    args.append("--render-check")
     status = str(options.get("status") or "pending").strip().lower()
     if status in {"pending", "approved"}:
         args.extend(["--status", status])

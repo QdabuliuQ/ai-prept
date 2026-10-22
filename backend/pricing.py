@@ -14,6 +14,11 @@ from typing import Any
 RateTriple = tuple[float, float, float]
 
 _RATES: dict[str, RateTriple] = {
+    # Agnes 文本模型当前免费（$0/1M，官网 2026-10 价格），按 0 计
+    "agnes-3.0-flash": (0.0, 0.0, 0.0),
+    "agnes-2.5-flash": (0.0, 0.0, 0.0),
+    "agnes-2.5-pro-alpha": (0.0, 0.0, 0.0),
+    "agnes-2.5-pro-beta": (0.0, 0.0, 0.0),
     "deepseek-v4-flash": (0.2, 1.0, 2.0),
     "deepseek-chat": (0.2, 1.0, 2.0),
     "deepseek-reasoner": (0.2, 1.0, 2.0),  # 现映射 Flash 思考模式

@@ -128,6 +128,7 @@ export function GeneratePanel({
             setLlmModel(preferred.models[0]?.id || "");
           }
           const preferredImg =
+            imgProviders.find((p) => p.id === "agnes" && p.configured) ||
             imgProviders.find((p) => p.id === "openai" && p.configured) ||
             imgProviders.find((p) => p.configured) ||
             imgProviders[0];

@@ -7,8 +7,12 @@ import re
 from pathlib import Path
 
 from templates.remix import (
+    _compact_slot_row,
+    _load_visual_brief,
+    _plan_content_once,
     apply_text_to_html,
     clamp_text_to_max_chars,
+    clamp_texts_for_slots,
     estimate_max_chars,
     fit_slot_inner,
     inventory_slide_slots,
@@ -17,7 +21,10 @@ from templates.remix import (
     parse_slot_box,
     remix_template_package,
     resolve_horizontal_slot_collisions,
+    render_regressions,
+    verify_slide_fit,
 )
+from templates.slot_tree import split_composite_slots
 
 
 SAMPLE_HTML = """<!DOCTYPE html>
@@ -116,8 +123,6 @@ def test_remix_package_mock(tmp_path: Path) -> None:
 
 
 def test_remix_plan_prompt_locks_image_palette() -> None:
-    from templates.remix import _plan_content_once
-
     # Inspect prompt construction without calling LLM: reuse the user template
     # by importing the same constraint strings via a dry run of the f-string
     # builder path (monkeypatch chat_json).
@@ -161,6 +166,60 @@ def test_remix_plan_prompt_locks_image_palette() -> None:
     assert "配图色调" in captured["system"] or "visual-spec" in captured["system"]
     assert "配图色调" in captured["user"]
     assert "只改画面主体" in captured["user"] or "只写新主体" in captured["user"]
+
+
+def test_remix_prompt_includes_complete_visual_brief() -> None:
+    captured: dict[str, str] = {}
+
+    def fake_chat_json(**kwargs):  # type: ignore[no-untyped-def]
+        captured["user"] = kwargs.get("user") or ""
+        return {
+            "label_zh": "x",
+            "description_zh": "y",
+            "texts": {"slides/a.html": {"title": "t"}},
+            "images": {},
+        }
+
+    from unittest.mock import patch
+
+    tail = "尾部叠字组规则：title-3 与 title-4 必须使用相同文案。"
+    visual_brief = "视觉规范开头\n" + ("背景说明" * 1200) + tail
+    with patch("templates.remix.chat_json", side_effect=fake_chat_json), patch(
+        "templates.remix.make_client_pool", return_value=object()
+    ), patch("config.llm_config") as cfg:
+        cfg.return_value.model = "mock"
+        cfg.return_value.api_keys = ["k"]
+        _plan_content_once(
+            prompt="新人培训",
+            slots=[
+                {
+                    "file": "slides/a.html",
+                    "slot": "title",
+                    "type": "text",
+                    "role": "heading",
+                    "current": "原标题",
+                    "fields": ["title"],
+                }
+            ],
+            source_label="测试模板",
+            pages=[{"file": "slides/a.html", "title": "封面", "layout": "cover"}],
+            visual_brief=visual_brief,
+            log=None,
+        )
+    assert tail in captured["user"]
+
+
+def test_visual_brief_reads_files_without_truncation(tmp_path: Path) -> None:
+    spec_tail = "槽位尾部规则"
+    theme_tail = "--tail-rule: keep;"
+    long_spec = "# 规范\n" + ("规范正文" * 1200) + spec_tail
+    long_theme = ":root {\n" + ("--unused: 1;\n" * 500) + theme_tail + "\n}"
+    (tmp_path / "visual-spec.md").write_text(long_spec, encoding="utf-8")
+    (tmp_path / "theme.css").write_text(long_theme, encoding="utf-8")
+
+    brief = _load_visual_brief(tmp_path)
+    assert spec_tail in brief
+    assert theme_tail in brief
 
 
 def test_remix_requires_visual_spec(tmp_path: Path) -> None:
@@ -371,3 +430,225 @@ def test_missing_text_slots_and_merge() -> None:
     assert merged["texts"]["slides/a.html"]["t2"] == "新B"
     assert not missing_text_slots(slots, merged)
 
+
+def test_leading_zero_index_slot_is_not_dynamic_copy() -> None:
+    html = """<!DOCTYPE html><html><body>
+<div class="pptx-slide-root" style="position:relative;width:1920px;height:1080px">
+  <div data-slot="label" data-slot-type="text" data-slot-role="meta"
+       style="position:absolute;left:50px;top:50px;width:80px;height:60px">
+    <div style="font-size:24pt"><span>01</span></div>
+  </div>
+  <div data-slot="body" data-slot-type="text" data-slot-role="body"
+       style="position:absolute;left:150px;top:50px;width:400px;height:60px">
+    <div style="font-size:24pt"><span>正文</span></div>
+  </div>
+</div></body></html>"""
+    slots = inventory_slide_slots(html, file="slides/a.html")
+    assert [s["slot"] for s in slots] == ["body"]
+
+
+# --- regression: composite row slots (图2 错位 + 出画) ---------------------
+
+ROW_HTML = """<!DOCTYPE html><html><body>
+<div class="pptx-slide-root slide" style="position: relative; width: 1920px; height: 1080px; overflow: hidden">
+  <div data-slot="body-3" data-slot-type="text" data-slot-role="body"
+       style="position: absolute; left: 184.8px; top: 292.275px; width: 1466.04px; height: 568.89px">
+    <div style="position: absolute; left: 0px; top: 15.225px; width: 39.129px; height: 46.2px">
+      <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap">
+        <div style="line-height: 22.5pt; font-size: 22.5pt"><span style="font-size: 22.5pt">01</span></div>
+      </div>
+    </div>
+    <div style="position: absolute; left: 114.06px; top: 0px; width: 485.28px; height: 73.89px">
+      <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap">
+        <div style="line-height: 22.5pt; font-size: 21.3pt"><span style="font-size: 21.3pt">军地需求双向清单</span></div>
+        <div style="line-height: 22.5pt; font-size: 15.75pt"><span style="font-size: 15.75pt">建立街道与驻区部队需求双向清单</span></div>
+      </div>
+    </div>
+    <div style="position: absolute; left: 1254.36px; top: 6.375px; width: 211.68px; height: 62.34px">
+      <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap">
+        <div style="line-height: 22.5pt; font-size: 15.75pt"><span style="font-size: 15.75pt">责任：街道人民武装部</span></div>
+        <div style="line-height: 22.5pt; font-size: 15.75pt"><span style="font-size: 15.75pt">节点：2026年9月</span></div>
+      </div>
+    </div>
+    <div style="position: absolute; left: 0px; top: 114.225px; width: 39.129px; height: 46.2px">
+      <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap">
+        <div style="line-height: 22.5pt; font-size: 22.5pt"><span style="font-size: 22.5pt">02</span></div>
+      </div>
+    </div>
+    <div style="position: absolute; left: 114.06px; top: 99px; width: 443.28px; height: 73.89px">
+      <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap">
+        <div style="line-height: 22.5pt; font-size: 21.3pt"><span style="font-size: 21.3pt">社区国防教育角</span></div>
+        <div style="line-height: 22.5pt; font-size: 15.75pt"><span style="font-size: 15.75pt">在三个社区试点共建教育角</span></div>
+      </div>
+    </div>
+    <div style="position: absolute; left: 1254.36px; top: 105.375px; width: 211.68px; height: 62.34px">
+      <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap">
+        <div style="line-height: 22.5pt; font-size: 15.75pt"><span style="font-size: 15.75pt">责任：社区党建办公室</span></div>
+        <div style="line-height: 22.5pt; font-size: 15.75pt"><span style="font-size: 15.75pt">节点：2026年10月</span></div>
+      </div>
+    </div>
+    <div style="position: absolute; left: 0px; top: 213.225px; width: 39.129px; height: 46.2px">
+      <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap">
+        <div style="line-height: 22.5pt; font-size: 22.5pt"><span style="font-size: 22.5pt">03</span></div>
+      </div>
+    </div>
+    <div style="position: absolute; left: 114.06px; top: 198px; width: 401.28px; height: 73.89px">
+      <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap">
+        <div style="line-height: 22.5pt; font-size: 21.3pt"><span style="font-size: 21.3pt">老兵议事会常态化</span></div>
+        <div style="line-height: 22.5pt; font-size: 15.75pt"><span style="font-size: 15.75pt">每月一次进社区</span></div>
+      </div>
+    </div>
+    <div style="position: absolute; left: 1254.36px; top: 204.375px; width: 211.68px; height: 62.34px">
+      <div style="display: flex; flex-direction: column; overflow: hidden; white-space: nowrap">
+        <div style="line-height: 22.5pt; font-size: 15.75pt"><span style="font-size: 15.75pt">责任：退役军人服务站</span></div>
+        <div style="line-height: 22.5pt; font-size: 15.75pt"><span style="font-size: 15.75pt">节点：2026年8月起</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body></html>"""
+
+
+def test_composite_slot_split_gives_row_and_field_metadata() -> None:
+    """Every row field must be its own slot with row/col + per-line hints."""
+    html, stats = split_composite_slots(ROW_HTML)
+    assert stats["leaves"] == 6
+
+    slots = inventory_slide_slots(html, file="slides/content-9.html")
+    by_slot = {s["slot"]: s for s in slots}
+    # Title/desc leaf and owner/when leaf of the same row share a row number.
+    assert by_slot["body-3-1"]["row"] == by_slot["body-3-2"]["row"]
+    assert by_slot["body-3-1"]["col"] < by_slot["body-3-2"]["col"]
+    assert by_slot["body-3-1"]["fields"] == ["title", "desc"]
+    assert by_slot["body-3-2"]["fields"] == ["owner", "when"]
+    # Index column is layout, not copy: it is not offered to the planner.
+    assert not any("01" == s["current"] for s in slots)
+
+    compact = _compact_slot_row(by_slot["body-3-2"])
+    assert compact["row"] == by_slot["body-3-2"]["row"]
+    assert compact["lines"] == 2
+    assert isinstance(compact["line_chars"], list)
+
+
+def test_per_line_budget_keeps_realistic_copy_without_truncation() -> None:
+    html, _ = split_composite_slots(ROW_HTML)
+    slots = inventory_slide_slots(html, file="slides/content-9.html")
+    by_slot = {s["slot"]: s for s in slots}
+    row = by_slot["body-3-2"]
+    plan = {
+        "body-3-2": "责任：街道退役军人服务站\n节点：2026年12月",
+        "body-3-1": "军地需求双向清单\n建立街道与驻区部队需求双向清单，每季度更新一次",
+    }
+    out = clamp_texts_for_slots(plan, slots)
+    assert out["body-3-2"] == plan["body-3-2"]
+    assert out["body-3-1"] == plan["body-3-1"]
+    applied = apply_text_to_html(html, out)
+    assert "责任：街道退役军人服务站" in applied
+    assert "节点：2026年12月" in applied
+    assert verify_slide_fit(applied, baseline=html) == []
+
+
+def test_overlong_copy_is_fitted_inside_leaf_box_not_canvas() -> None:
+    """图2: a whole row packed into one column must never escape the slide."""
+    html, _ = split_composite_slots(ROW_HTML)
+    slots = inventory_slide_slots(html, file="slides/content-9.html")
+    long = "这是一个明显过长并且会越界的文案示例内容用来测试截断" * 4
+    updates = {
+        s["slot"]: "\n".join([long] * max(1, len(s.get("fields") or [])))
+        for s in slots
+    }
+    out = apply_text_to_html(html, clamp_texts_for_slots(updates, slots))
+    assert verify_slide_fit(out, baseline=html) == []
+    # Text was fitted into the leaf, not left to spill across the slide.
+    assert long not in out
+    # Row geometry untouched.
+    assert "left: 1254.36px" in out
+
+
+def test_verify_slide_fit_reports_new_overflow_only() -> None:
+    html, _ = split_composite_slots(ROW_HTML)
+    clean = verify_slide_fit(html)
+    assert clean == []
+
+    broken = html.replace(
+        "<span style=\"font-size: 15.75pt\">责任：街道人民武装部</span>",
+        "<span style=\"font-size: 15.75pt\">"
+        "责任：街道人民武装部并附带一长串根本装不下的说明文字</span>",
+        1,
+    )
+    issues = verify_slide_fit(broken, baseline=html)
+    assert [i["reason"] for i in issues] == ["ink_overflow"]
+
+
+def test_relax_keeps_template_overflow_policy() -> None:
+    """Fit now guarantees containment, so original overflow CSS must survive."""
+    html, _ = split_composite_slots(ROW_HTML)
+    out = apply_text_to_html(html, {"body-3-2": "责任：某某办公室\n节点：2027年1月"})
+    assert "overflow: hidden" in out
+
+
+def test_chunk_slots_by_page_respects_limits() -> None:
+    from templates.remix import _chunk_slots_by_page
+
+    pages = [{"file": f"slides/p{i}.html"} for i in range(6)]
+    slots = [
+        {"file": f"slides/p{i}.html", "slot": f"s{j}", "type": "text"}
+        for i in range(6)
+        for j in range(20)
+    ]
+    batches = _chunk_slots_by_page(slots, pages)
+    assert len(batches) >= 3
+    assert sum(len(b[0]) for b in batches) == len(slots)
+    for batch_slots, batch_pages in batches:
+        assert len(batch_slots) <= 55
+        assert len(batch_pages) <= 3
+    # Every page is planned in exactly one batch (no page split across batches).
+    files = [s["file"] for b in batches for s in b[0]]
+    assert set(files) == {p["file"] for p in pages}
+    for f in set(files):
+        assert files.count(f) == 20
+
+
+def test_render_regressions_ignore_source_baseline_but_flag_worse_overflow() -> None:
+    baseline = {
+        "issues": [
+            {
+                "file": "slides/a.html",
+                "slot": "subtitle",
+                "reason": "clipped_horizontally",
+                "text_right": 764,
+                "clip_right": 760,
+            }
+        ]
+    }
+    same = {
+        "issues": [
+            {
+                "file": "slides/a.html",
+                "slot": "subtitle",
+                "reason": "clipped_horizontally",
+                "text_right": 765,
+                "clip_right": 760,
+            }
+        ]
+    }
+    worse = {
+        "issues": [
+            {
+                "file": "slides/a.html",
+                "slot": "subtitle",
+                "reason": "clipped_horizontally",
+                "text_right": 800,
+                "clip_right": 760,
+            },
+            {
+                "file": "slides/a.html",
+                "slot": "body",
+                "reason": "out_of_canvas",
+                "right": 1940,
+                "bottom": 600,
+            },
+        ]
+    }
+    assert render_regressions(same, baseline) == []
+    assert len(render_regressions(worse, baseline)) == 2

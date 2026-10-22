@@ -70,7 +70,9 @@ def _usage_summary(meta: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _publish_flags(template_id: str, meta: dict[str, Any]) -> dict[str, bool]:
+def _publish_flags(template_id: str, meta: dict[str, Any]) -> dict[str, Any]:
+    from templates.capacity import capacity_status
+
     root = template_dir(template_id)
     spec = root / "visual-spec.md"
     has_visual_spec = False
@@ -89,11 +91,21 @@ def _publish_flags(template_id: str, meta: dict[str, Any]) -> dict[str, bool]:
     has_preview_pack = slide_count > 0 and len(preview_names) >= slide_count
     zip_path = root / "package.zip"
     has_package_zip = zip_path.is_file() and zip_path.stat().st_size > 0
+    capacity = capacity_status(root)
     return {
         "hasVisualSpec": has_visual_spec,
         "hasPreviewPack": has_preview_pack,
         "hasPackageZip": has_package_zip,
-        "publishReady": has_visual_spec and has_preview_pack and has_package_zip,
+        "hasCapacity": bool(capacity.get("hasCapacity")),
+        "capacityStatus": capacity.get("capacityStatus"),
+        "capacitySlots": capacity.get("capacitySlots"),
+        "capacityIssues": capacity.get("capacityIssues"),
+        "publishReady": (
+            has_visual_spec
+            and capacity.get("capacityStatus") == "ready"
+            and has_preview_pack
+            and has_package_zip
+        ),
     }
 
 

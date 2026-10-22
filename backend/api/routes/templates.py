@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Optional, List, Dict, Any
 
 from typing import Any
@@ -189,6 +190,15 @@ async def prepare(template_id: str, request: Request):
     if not isinstance(previews, list) or not previews:
         return err(400, error="缺少预览图。请先离屏截图。")
     try:
+        from templates.capacity import ensure_capacity_contract
+
+        capacity = ensure_capacity_contract(template_dir(tid))
+        if capacity.get("status") != "ready":
+            return err(
+                400,
+                error="TEMPLATE_CAPACITY_REQUIRED",
+                message="模板容量契约未通过校验，不能打包上传",
+            )
         shots = decode_preview_body(previews)
         result = prepare_template_package(tid, shots)
         return ok(ok=True, **result)
@@ -209,6 +219,15 @@ def upload(template_id: str):
             error="未配置七牛云。请在 .env.local 设置 QINIU_ACCESS_KEY / QINIU_SECRET_KEY / QINIU_BUCKET / QINIU_DOMAIN 后重启服务。",
         )
     try:
+        from templates.capacity import ensure_capacity_contract
+
+        capacity = ensure_capacity_contract(template_dir(tid))
+        if capacity.get("status") != "ready":
+            return err(
+                400,
+                error="TEMPLATE_CAPACITY_REQUIRED",
+                message="模板容量契约未通过校验，不能上传",
+            )
         result = pack_and_upload_template(tid)
         return ok(ok=True, **result)
     except Exception as e:  # noqa: BLE001
@@ -240,6 +259,22 @@ async def use_template(template_id: str, request: Request):
             400,
             error="VISUAL_SPEC_REQUIRED",
             message="源模板缺少 visual-spec.md，请先生成设计规范后再使用模板",
+        )
+    try:
+        from templates.capacity import ensure_capacity_contract
+
+        contract = ensure_capacity_contract(template_dir(tid))
+        if contract.get("status") != "ready":
+            return err(
+                400,
+                error="TEMPLATE_CAPACITY_REQUIRED",
+                message="模板容量契约未通过结构校验，已禁止套用",
+            )
+    except Exception as exc:  # noqa: BLE001
+        return err(
+            400,
+            error="TEMPLATE_CAPACITY_REQUIRED",
+            message=f"无法生成模板容量契约：{exc}",
         )
     try:
         job = start_remix_job(
@@ -320,6 +355,8 @@ async def visual_spec(template_id: str, request: Request):
         return err(404, error="NOT_FOUND")
     mock = False
     only_if_missing = False
+    llm_provider = ""
+    llm_model = ""
     try:
         if request.headers.get("content-type", "").startswith("application/json"):
             body = await request.json()
@@ -329,26 +366,92 @@ async def visual_spec(template_id: str, request: Request):
                 or body.get("onlyIfMissing")
                 or body.get("only_if_missing")
             )
+            llm_provider = str(body.get("llmProvider") or "").strip()
+            llm_model = str(body.get("llmModel") or "").strip()
     except Exception:
         pass
     try:
+        selected_config = None
+        selected_label = ""
+        if llm_provider or llm_model:
+            from admin.providers import (
+                llm_config_for_selection,
+                resolve_vision_selection,
+            )
+
+            selection = resolve_vision_selection(llm_provider, llm_model)
+            selected_config = llm_config_for_selection(selection)
+            selected_label = str(selection.get("label") or "")
         out = generate_visual_spec(
-            root, mock=mock, only_if_missing=only_if_missing
+            root,
+            mock=mock,
+            only_if_missing=only_if_missing,
+            vision_config=selected_config,
+            synthesis_config=selected_config,
         )
+        from templates.capacity import build_capacity_contract
+
+        capacity = build_capacity_contract(root, render_baseline=True)
+        if capacity.get("status") != "ready":
+            raise RuntimeError(
+                "visual-spec 已生成，但容量契约结构校验失败："
+                + ", ".join(
+                    str(item.get("code") or "unknown")
+                    for item in capacity.get("issues") or []
+                )[:300]
+            )
         try:
             from admin.store import upsert_template_row
 
             upsert_template_row(tid)
         except Exception:
             pass
-        return ok(ok=True, id=tid, path=str(out), status="ok", log="")
+        return ok(
+            ok=True,
+            id=tid,
+            path=str(out),
+            status="ok",
+            log="",
+            llmProvider=llm_provider or None,
+            llmModel=llm_model or None,
+            llmLabel=selected_label or None,
+        )
     except Exception as e:  # noqa: BLE001
         msg = str(e)
         code = "GENERATE_FAILED"
-        if "LLM" in msg or "key" in msg.lower():
+        if (
+            "LLM" in msg
+            or "key" in msg.lower()
+            or "视觉" in msg
+            or "API Key" in msg
+            or "未配置" in msg
+        ):
             code = "LLM_CONFIG"
         status = 400 if code == "LLM_CONFIG" else 500
         return err(status, error=code, message=msg)
+
+
+@router.get("/api/admin/templates/{template_id}/capacity")
+def get_template_capacity(template_id: str):
+    """Return the compiled slot/capacity contract and its freshness."""
+    from admin.fsutil import template_dir
+    from templates.capacity import CAPACITY_FILE, capacity_status
+
+    tid = _safe(template_id)
+    if isinstance(tid, JSONResponse):
+        return tid
+    root = template_dir(tid)
+    if not root.is_dir():
+        return err(404, error="NOT_FOUND")
+    status = capacity_status(root)
+    path = root / CAPACITY_FILE
+    contract = None
+    if path.is_file():
+        try:
+            contract = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            contract = None
+    return ok(ok=True, id=tid, **status, contract=contract)
 
 
 @router.get("/api/admin/templates/{template_id}/source.pptx")
