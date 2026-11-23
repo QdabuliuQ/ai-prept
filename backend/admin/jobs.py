@@ -361,6 +361,25 @@ def _append_log(job: dict[str, Any], text: str) -> None:
                 }
             )
 
+    # Agent 引擎进度：每一步都打 [agent-step] / [agent-gate] / [agent-finish]
+    agent_step = re.search(r"\[agent-step\]\s+n=(\d+)(?:\s+tool=(\S+))?", text)
+    if agent_step:
+        n = int(agent_step.group(1))
+        if job.get("progress"):
+            job["progress"]["agentStep"] = n
+            job["progress"]["lastAction"] = agent_step.group(2) or "call"
+    gate_m = re.search(r"\[agent-gate\]\s+n=(\d+)\s+finish=1\s+ok=(\d)", text)
+    if gate_m and job.get("progress"):
+        job["progress"]["agentStep"] = int(gate_m.group(1))
+        job["progress"]["lastGate"] = "passed" if gate_m.group(2) == "1" else "rejected"
+    finish_m = re.search(r"\[agent-finish\]\s+status=(\S+)", text)
+    if finish_m:
+        job["agentStatus"] = finish_m.group(1)
+    engine_m = re.search(r"\[engine\]\s+(\S+)\s+status=(\S+)", text)
+    if engine_m:
+        job["engine"] = engine_m.group(1)
+        job["engineStatus"] = engine_m.group(2)
+
     id_m = re.search(r"id=([^\s]+)", text)
     if id_m and job.get("progress"):
         job["progress"]["lastId"] = id_m.group(1)
@@ -497,6 +516,9 @@ def _build_ppt_master_args(
     strip_unsupported: bool,
     report_path: Path,
     hint: str,
+    engine: str = "pipeline",
+    agent_full: bool = False,
+    agent_max_steps: int = 40,
 ) -> list[str]:
     args = [
         "ppt-master",
@@ -529,6 +551,10 @@ def _build_ppt_master_args(
     args.append(
         "--strip-unsupported" if strip_unsupported else "--no-strip-unsupported"
     )
+    if engine == "agent":
+        args.extend(["--engine", "agent", "--agent-max-steps", str(agent_max_steps)])
+        if agent_full:
+            args.append("--agent-full")
     args.extend(["--", hint])
     return args
 
@@ -691,6 +717,9 @@ def _spawn_per_pack_random(
                 strip_unsupported=strip_unsupported,
                 report_path=pack_report,
                 hint=prompt,
+                engine=str(job.get("engine") or "pipeline"),
+                agent_full=bool(job.get("agentFull")),
+                agent_max_steps=int(job.get("agentMaxSteps") or 40),
             )
             extra = dict(base_extra)
             from templates.categories import normalize_category
@@ -868,6 +897,12 @@ def start_generate_job(options: dict[str, Any]) -> dict[str, Any]:
     quality_gate = str(options.get("qualityGate") or "soft").strip().lower()
     if quality_gate not in ("soft", "strict", "skip"):
         quality_gate = "soft"
+    # 生成引擎：pipeline（默认，行为不变）| agent（Agent Loop，只接管规划）
+    engine = str(options.get("engine") or "pipeline").strip().lower()
+    if engine not in ("pipeline", "agent"):
+        engine = "pipeline"
+    agent_full = bool(options.get("agentFull"))
+    agent_max_steps = int(options.get("agentMaxSteps") or 40)
     svg_repair = options.get("repairOnFail") is not False
     strip_unsupported = options.get("stripUnsupported") is not False
     palette_refine = bool(options.get("paletteRefine"))
@@ -919,6 +954,9 @@ def start_generate_job(options: dict[str, Any]) -> dict[str, Any]:
         "paletteRefine": palette_refine,
         "packageFormat": "ppt-master",
         "pipeline": "ppt-master",
+        "engine": engine,
+        "agentFull": agent_full if engine == "agent" else None,
+        "agentMaxSteps": agent_max_steps if engine == "agent" else None,
         "visualStyle": visual_style,
         "styleIntent": style_intent or None,
         "ensureStyle": ensure_style,
@@ -1008,9 +1046,16 @@ def start_generate_job(options: dict[str, Any]) -> dict[str, Any]:
         strip_unsupported=strip_unsupported,
         report_path=report_path,
         hint=hint,
+        engine=engine,
+        agent_full=agent_full,
+        agent_max_steps=agent_max_steps,
     )
 
-    job["log"] += f"[pipeline] ppt-master\n[style] {visual_style}\n"
+    job["log"] += (
+        f"[pipeline] ppt-master · engine={engine}"
+        f"{' (full)' if engine == 'agent' and agent_full else ''}\n"
+        f"[style] {visual_style}\n"
+    )
     return _spawn(job, args, extra)
 
 

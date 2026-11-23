@@ -122,6 +122,29 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="可选：写入 JSON 报告",
     )
+    pm.add_argument(
+        "--engine",
+        choices=("pipeline", "agent"),
+        default="pipeline",
+        help=(
+            "生成引擎：pipeline=现有硬编排流水线（默认，行为不变）；"
+            "agent=Agent Loop（只接管规划，SVG/样式/导出仍走 PPT Master）"
+        ),
+    )
+    pm.add_argument(
+        "--agent-full",
+        action="store_true",
+        help=(
+            "配合 --engine agent：开启完整生成（规划 + 逐页 SVG），"
+            "默认只接管规划阶段"
+        ),
+    )
+    pm.add_argument(
+        "--agent-max-steps",
+        type=int,
+        default=40,
+        help="配合 --engine agent：单包最大步数，默认 40",
+    )
 
     vs = sub.add_parser(
         "visual-spec",
@@ -484,6 +507,82 @@ def _cmd_styles_catalog(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_via_engine(
+    args: argparse.Namespace,
+    *,
+    prompt: str,
+    style: str,
+    count: int,
+    pages: int,
+    mock: bool,
+    skip_images: bool | None,
+    palette_refine: bool | None,
+    log,
+) -> list[dict]:
+    """通过统一引擎接口跑生成，返回旧格式的行列表。
+
+    ``--engine pipeline`` 走同样路径但行为与历史一致（薄包装）；
+    ``--engine agent`` 默认只接管规划，``--agent-full`` 才接管 SVG。
+    """
+    from ppt_master.engines import (
+        Budget,
+        EngineError,
+        GenerateSpec,
+        RunContext,
+        build_engine,
+    )
+    from ppt_master.engines.skill_bridge import LocalSkillBridge
+
+    full = bool(getattr(args, "agent_full", False))
+    max_steps = max(4, int(getattr(args, "agent_max_steps", 40) or 40))
+    bridge = LocalSkillBridge(log=log)
+    ctx = RunContext(log=log, bridge=bridge, mock=mock)
+
+    rows: list[dict] = []
+    total = max(1, min(20, int(count)))
+    engine = build_engine("agent")
+    for i in range(1, total + 1):
+        hint = prompt
+        if total > 1:
+            hint = f"{prompt}\n\n（批量 #{i}/{total}，请换一套互异版式与文案。）"
+        spec = GenerateSpec(
+            prompt=hint,
+            style=style,
+            pages=pages,
+            with_images=None if skip_images is None else (not skip_images),
+            palette_refine=bool(palette_refine),
+            out_root=args.out_root,
+            fast_preview=bool(getattr(args, "fast_preview", False)),
+            svg_repair=bool(getattr(args, "svg_repair", True)),
+            strip_unsupported=bool(getattr(args, "strip_unsupported", True)),
+            slide_concurrency=max(1, int(getattr(args, "slide_concurrency", 3) or 3)),
+            quality_gate=str(getattr(args, "quality_gate", None) or "soft"),
+            # agent 默认只接管规划；--agent-full 才放开 SVG 与页数浮动
+            allow_page_reshuffle=full,
+            budget=Budget(max_steps=max_steps),
+        )
+        try:
+            result = engine.run(spec, ctx)
+        except EngineError as exc:
+            rows.append({"ok": False, "error": str(exc), "engine": engine.name})
+            log(f"[engine] FAIL — {exc}\n")
+            continue
+        except Exception as exc:  # noqa: BLE001 - 引擎边界统一收敛
+            rows.append({"ok": False, "error": str(exc), "engine": engine.name})
+            log(f"[engine] FAIL — {type(exc).__name__}: {exc}\n")
+            continue
+        row = result.to_row()
+        row["render"] = row.get("render") or "svg"
+        row["engine"] = result.engine
+        rows.append(row)
+        log(
+            f"[engine] {result.engine} status={result.status} "
+            f"tid={result.template_id} steps={result.steps} "
+            f"calls={result.llm_calls} wall={result.wall_seconds:.1f}s\n"
+        )
+    return rows
+
+
 def _cmd_ppt_master(args: argparse.Namespace) -> int:
     from ppt_master.pipeline import run_ppt_master_pipeline
     from ppt_master.style_author import ensure_style
@@ -556,22 +655,37 @@ def _cmd_ppt_master(args: argparse.Namespace) -> int:
 
         os.environ["AGENT_TEMPLATE_CATEGORY"] = normalized
         print(f"[category] override={normalized}")
-    rows = run_ppt_master_pipeline(
-        prompt,
-        count=max(1, int(args.count or 1)),
-        pages=max(3, min(12, int(args.pages or 7))),
-        visual_style=style,
-        out_root=args.out_root,
-        mock=mock,
-        skip_images=skip_images,
-        palette_refine=palette_refine,
-        slide_concurrency=max(1, int(args.slide_concurrency or 3)),
-        fast_preview=bool(args.fast_preview),
-        svg_repair=bool(getattr(args, "svg_repair", True)),
-        quality_gate=str(getattr(args, "quality_gate", None) or "soft"),
-        strip_unsupported=bool(getattr(args, "strip_unsupported", True)),
-        log=lambda s: print(s, end="" if s.endswith("\n") else "\n", flush=True),
-    )
+    log_fn = lambda s: print(s, end="" if s.endswith("\n") else "\n", flush=True)
+    engine_name = str(getattr(args, "engine", "pipeline") or "pipeline").strip().lower()
+    if engine_name == "agent":
+        rows = _run_via_engine(
+            args,
+            prompt=prompt,
+            style=style,
+            count=max(1, int(args.count or 1)),
+            pages=max(3, min(12, int(args.pages or 7))),
+            mock=mock,
+            skip_images=skip_images,
+            palette_refine=palette_refine,
+            log=log_fn,
+        )
+    else:
+        rows = run_ppt_master_pipeline(
+            prompt,
+            count=max(1, int(args.count or 1)),
+            pages=max(3, min(12, int(args.pages or 7))),
+            visual_style=style,
+            out_root=args.out_root,
+            mock=mock,
+            skip_images=skip_images,
+            palette_refine=palette_refine,
+            slide_concurrency=max(1, int(args.slide_concurrency or 3)),
+            fast_preview=bool(args.fast_preview),
+            svg_repair=bool(getattr(args, "svg_repair", True)),
+            quality_gate=str(getattr(args, "quality_gate", None) or "soft"),
+            strip_unsupported=bool(getattr(args, "strip_unsupported", True)),
+            log=log_fn,
+        )
     if args.report:
         args.report.parent.mkdir(parents=True, exist_ok=True)
         args.report.write_text(

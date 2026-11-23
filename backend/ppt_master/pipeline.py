@@ -2082,8 +2082,18 @@ def run_one_package(
     svg_repair: bool = True,
     quality_gate: str = "soft",
     strip_unsupported: bool = True,
+    preset_plan: dict[str, Any] | None = None,
     log: LogFn | None = None,
 ) -> dict[str, Any]:
+    """生成一个模板包。
+
+    ``preset_plan`` 是 ``agent`` 引擎 S1 阶段的注入点：外部（agent 的 Plan
+    循环）已产出并通过校验的页表，交给本函数直接进入 SVG 授权之后的所有阶段。
+    为 ``None`` 时行为与历史完全一致（内部 best-of-N 规划）。
+
+    传入 ``preset_plan`` 时仍会走 ``_validate_plan`` —— **验收权不放给调用方**，
+    这也是"Agent 只接管规划、样式与编译仍归 PPT Master"的落点。
+    """
     from ppt_master.palette import (
         apply_palette_to_plan,
         palette_refine_enabled,
@@ -2126,14 +2136,32 @@ def run_one_package(
                 image_model=(os.environ.get("IMAGE_MODEL") or "").strip() or None,
             )
 
-        plan, plan_meta = _build_plan(
-            prompt=prompt,
-            pages=pages,
-            visual_style=visual_style or "dark-tech",
-            use_mock=use_mock,
-            log=log,
-            enable_images=enable_images,
-        )
+        if preset_plan is not None:
+            # 外部已规划：只做校验与规范化，不重新采样。
+            # 校验失败会抛错，绝不会因为"外部说它合格"就放行。
+            plan = dict(preset_plan)
+            _validate_plan(plan, pages)
+            plan_meta = {
+                "candidates": 0,
+                "selected": 0,
+                "score": _creative_score(
+                    plan, prompt=prompt, visual_style=visual_style or "dark-tech"
+                ),
+                "critique": _plan_critique(
+                    plan, prompt=prompt, visual_style=visual_style or "dark-tech"
+                ),
+                "source": "preset_plan",
+            }
+            _log(log, "[plan] preset plan accepted (external planner)")
+        else:
+            plan, plan_meta = _build_plan(
+                prompt=prompt,
+                pages=pages,
+                visual_style=visual_style or "dark-tech",
+                use_mock=use_mock,
+                log=log,
+                enable_images=enable_images,
+            )
         plan = force_plan_style(plan, visual_style or "dark-tech")
         plan, palette_notes = apply_palette_to_plan(
             plan, enabled=do_palette_refine
@@ -2574,9 +2602,14 @@ def run_ppt_master_pipeline(
     svg_repair: bool = True,
     quality_gate: str = "soft",
     strip_unsupported: bool = True,
+    preset_plan: dict[str, Any] | None = None,
     log: LogFn | None = None,
 ) -> list[dict[str, Any]]:
-    """批量：每包独立跑一遍（仅 SVG → PPTX → 模板包）。"""
+    """批量：每包独立跑一遍（仅 SVG → PPTX → 模板包）。
+
+    ``preset_plan`` 仅对 ``count == 1`` 有意义；批量时忽略并回退内部规划，
+    因为多包的差异化正是由内部创意种子提供的。
+    """
     total = max(1, min(20, int(count)))
     rows: list[dict[str, Any]] = []
     ok = fail = 0
@@ -2600,6 +2633,7 @@ def run_ppt_master_pipeline(
                 svg_repair=svg_repair,
                 quality_gate=quality_gate,
                 strip_unsupported=strip_unsupported,
+                preset_plan=preset_plan if total == 1 else None,
                 log=log,
             )
             row["render"] = "svg"

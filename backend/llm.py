@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
 import time
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import httpx
 from openai import OpenAI
 
 from config import LlmConfig
+
+logger = logging.getLogger(__name__)
 
 
 def _http_timeout(total_s: float) -> httpx.Timeout:
@@ -715,3 +719,312 @@ def chat_text(
         return (resp.choices[0].message.content or "").strip()
 
     return _run_with_pool(pool=pool, client=client, fn=_once)
+
+
+# ---------------------------------------------------------------------------
+# Tool calling（Agent 引擎用）：原生 tools + 伪协议双模
+# ---------------------------------------------------------------------------
+#
+# 为什么要双模：本项目跑在多厂商网关上，`tools` 参数兼容性参差；
+# 但 Agent Loop 一旦依赖 tool calling，网关不支持就直接瘫痪。
+# 因此原生优先，失败即降级为由 JSON 描述的伪协议——后者网关无关，必然可用。
+#
+# 伪协议的额外好处：A/B 对比时两个引擎可以跑在完全相同的模型与请求参数上。
+
+
+@dataclass
+class ToolCall:
+    """一次工具调用请求。"""
+
+    name: str
+    args: dict[str, Any] = field(default_factory=dict)
+    call_id: str | None = None
+    thought: str | None = None
+
+
+@dataclass
+class ToolReply:
+    """模型一轮的回复。
+
+    ``mode`` 决定下一轮把工具结果塞回 messages 的形式：
+    ``native`` 用 ``role="tool"``，``pseudo`` 用普通 user 消息。
+    """
+
+    mode: str
+    calls: list[ToolCall] = field(default_factory=list)
+    text: str = ""
+    finish_reason: str | None = None
+    assistant_message: dict[str, Any] = field(default_factory=dict)
+
+
+_PSEUDO_PROTOCOL = """## 工具调用协议
+
+你没有原生函数调用能力，请用 JSON 描述下一步动作。**每次只输出一个 JSON 对象**，
+不要 Markdown 代码块，不要解释文字。
+
+期望 JSON：
+{"thought": "一句话说明为什么这么做", "action": {"name": "工具名", "args": {...}}}
+
+可用工具：
+{tool_list}
+
+规则：
+- args 必须严格符合该工具的参数 schema。
+- 想收工时调用 `finish`；它会触发独立复检，不通过会把具体缺陷返回给你。
+- 若你认为某缺陷无法修复，仍调用 `finish` 并在 args.reason 中说明。
+"""
+
+_TOOL_UNSUPPORTED_TOKENS = (
+    "tools",
+    "tool_choice",
+    "function",
+    "unsupported",
+    "unknown parameter",
+    "invalid_request",
+    "not support",
+    "does not support",
+)
+
+
+def _tool_specs(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把内部工具定义翻译为 OpenAI tools 数组（已是该形状则原样返回）。"""
+    specs: list[dict[str, Any]] = []
+    for tool in tools:
+        if "type" in tool and "function" in tool:
+            specs.append(tool)
+            continue
+        specs.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("parameters")
+                    or {"type": "object", "properties": {}},
+                },
+            }
+        )
+    return specs
+
+
+def _tool_list_for_prompt(tools: list[dict[str, Any]]) -> str:
+    """伪协议用的人类可读工具清单（压缩 JSON，避免占太多 token）。"""
+    rows: list[str] = []
+    for item in _tool_specs(tools):
+        fn = item["function"]
+        params = json.dumps(fn.get("parameters") or {}, ensure_ascii=False, separators=(",", ":"))
+        rows.append(f"- {fn['name']}: {fn.get('description', '')}\n  args: {params}")
+    return "\n".join(rows)
+
+
+def _looks_like_tool_unsupported(exc: BaseException) -> bool:
+    text = str(exc).lower()
+    return any(token in text for token in _TOOL_UNSUPPORTED_TOKENS)
+
+
+def _parse_pseudo_reply(content: str) -> ToolReply:
+    """把伪协议 JSON 解析为 ToolReply；解析失败视为"无工具调用的文本回复"。"""
+    text = (content or "").strip()
+    try:
+        data = _loads_json_object(text)
+    except (json.JSONDecodeError, ValueError):
+        return ToolReply(mode="pseudo", text=text)
+
+    action = data.get("action")
+    thought = data.get("thought")
+    if not isinstance(action, dict):
+        return ToolReply(mode="pseudo", text=text)
+
+    name = str(action.get("name") or "").strip()
+    if not name:
+        return ToolReply(mode="pseudo", text=text)
+    raw_args = action.get("args")
+    args = raw_args if isinstance(raw_args, dict) else {}
+    return ToolReply(
+        mode="pseudo",
+        calls=[ToolCall(name=name, args=args, thought=thought if isinstance(thought, str) else None)],
+        text=text,
+        assistant_message={"role": "assistant", "content": text},
+    )
+
+
+def chat_tools(
+    client: OpenAI | None = None,
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    temperature: float = 0.3,
+    pool: LlmClientPool | None = None,
+    prefer: str = "auto",
+) -> ToolReply:
+    """一轮带工具的模型调用。
+
+    ``prefer``：
+
+    - ``auto``   先试原生 tool calling，失败（网关不支持）自动降级伪协议
+    - ``native`` 只用原生，失败即抛错
+    - ``pseudo`` 只用伪协议（A/B 时用来消除协议差异）
+
+    原生模式下 ``messages`` 需由调用方按 OpenAI 格式维护（assistant.tool_calls
+    与 role=tool 消息）；伪协议模式下工具结果以普通 user 消息回路。
+    两种模式的具体消息拼装见 ``tool_result_messages``。
+    """
+    mode = (prefer or "auto").strip().lower()
+    if mode not in {"auto", "native", "pseudo"}:
+        raise ValueError(f"chat_tools prefer 非法：{prefer!r}")
+
+    if mode in {"auto", "native"}:
+        try:
+            return _chat_tools_native(
+                client=client,
+                model=model,
+                messages=messages,
+                tools=tools,
+                temperature=temperature,
+                pool=pool,
+            )
+        except Exception as exc:  # noqa: BLE001 - 只在明确不支持时降级
+            if mode == "native" or not _looks_like_tool_unsupported(exc):
+                raise
+            logger.warning("tool calling 不被支持，降级伪协议：%s", exc)
+
+    return _chat_tools_pseudo(
+        client=client,
+        model=model,
+        messages=messages,
+        tools=tools,
+        temperature=temperature,
+        pool=pool,
+    )
+
+
+def _chat_tools_native(
+    *,
+    client: OpenAI | None,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    temperature: float,
+    pool: LlmClientPool | None,
+) -> ToolReply:
+    specs = _tool_specs(tools)
+
+    def _once(c: OpenAI) -> ToolReply:
+        resp = c.chat.completions.create(
+            model=model,
+            temperature=temperature,
+            messages=messages,
+            tools=specs,
+        )
+        from usage import record_page_usage
+
+        record_page_usage(getattr(resp, "usage", None))
+        choice = resp.choices[0]
+        msg = choice.message
+        raw_calls = getattr(msg, "tool_calls", None) or []
+        calls: list[ToolCall] = []
+        assistant_message: dict[str, Any] = {
+            "role": "assistant",
+            "content": msg.content or "",
+        }
+        if raw_calls:
+            wire_calls: list[dict[str, Any]] = []
+            for item in raw_calls:
+                fn = getattr(item, "function", None)
+                name = str(getattr(fn, "name", "") or "")
+                raw_args = getattr(fn, "arguments", None) or "{}"
+                try:
+                    parsed = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    parsed = {}
+                call_id = getattr(item, "id", None)
+                calls.append(
+                    ToolCall(
+                        name=name,
+                        args=parsed if isinstance(parsed, dict) else {},
+                        call_id=call_id,
+                    )
+                )
+                wire_calls.append(
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": name, "arguments": raw_args},
+                    }
+                )
+            assistant_message["tool_calls"] = wire_calls
+        return ToolReply(
+            mode="native",
+            calls=calls,
+            text=msg.content or "",
+            finish_reason=getattr(choice, "finish_reason", None),
+            assistant_message=assistant_message,
+        )
+
+    return _run_with_pool(pool=pool, client=client, fn=_once)
+
+
+def _chat_tools_pseudo(
+    *,
+    client: OpenAI | None,
+    model: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    temperature: float,
+    pool: LlmClientPool | None,
+) -> ToolReply:
+    protocol = _PSEUDO_PROTOCOL.format(tool_list=_tool_list_for_prompt(tools))
+    augmented = list(messages)
+    if augmented and augmented[0].get("role") == "system":
+        augmented[0] = {
+            "role": "system",
+            "content": f"{augmented[0].get('content') or ''}\n\n{protocol}",
+        }
+    else:
+        augmented.insert(0, {"role": "system", "content": protocol})
+
+    def _once(c: OpenAI) -> ToolReply:
+        resp = _create_chat(
+            c,
+            model=model,
+            messages=augmented,
+            temperature=temperature,
+            json_object=True,
+        )
+        from usage import record_page_usage
+
+        record_page_usage(getattr(resp, "usage", None))
+        content = (resp.choices[0].message.content or "").strip()
+        reply = _parse_pseudo_reply(content)
+        reply.finish_reason = resp.choices[0].finish_reason
+        return reply
+
+    return _run_with_pool(pool=pool, client=client, fn=_once)
+
+
+def tool_result_messages(
+    reply: ToolReply,
+    call: ToolCall,
+    result: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """把一次工具执行结果编码为下一轮 messages。
+
+    原生模式用 ``role="tool"``（需要先追加带 tool_calls 的 assistant 消息）；
+    伪协议模式用普通 user 消息，因为网关不认识 tool 角色。
+    """
+    payload = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+    if reply.mode == "native":
+        return [
+            {
+                "role": "tool",
+                "tool_call_id": call.call_id or "",
+                "content": payload,
+            }
+        ]
+    return [
+        {
+            "role": "user",
+            "content": f"工具 `{call.name}` 的执行结果：\n{payload}\n\n请根据结果继续。",
+        }
+    ]
