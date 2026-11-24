@@ -267,6 +267,9 @@ def get_editor_job(job_id: str):
     summary = None
     summary_markdown = None
     intent = None
+    render_check = None
+    validation_status = None
+    needs_review = False
     try:
         from admin.fsutil import jobs_dir
         import json
@@ -283,6 +286,9 @@ def get_editor_job(job_id: str):
                 summary = row.get("summary")
                 summary_markdown = row.get("summaryMarkdown")
                 intent = row.get("intent")
+                render_check = row.get("renderCheck")
+                validation_status = row.get("validationStatus")
+                needs_review = bool(row.get("needsReview"))
                 if isinstance(row.get("deletedFiles"), list):
                     deleted_files = [str(x) for x in row["deletedFiles"] if x]
                 if isinstance(row.get("changedFiles"), list):
@@ -322,5 +328,8 @@ def get_editor_job(job_id: str):
             "summary": summary,
             "summaryMarkdown": summary_markdown,
             "intent": intent,
+            "renderCheck": render_check,
+            "validationStatus": validation_status,
+            "needsReview": needs_review,
         }
     }

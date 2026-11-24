@@ -692,6 +692,39 @@ body {{
         meta["category"] = prev["category"]
     # clear deferred flag
     meta.pop("html_convert", None)
+
+    # Browser-side PPTX conversion has just produced the HTML package. Run the
+    # same visual gate used by the Agent before the package is surfaced to the
+    # gallery/editor. This is advisory here: conversion remains successful, but
+    # the report is persisted so the UI/Agent can request a repair or review.
+    render_report: dict[str, Any] | None = None
+    try:
+        from templates.render_check import check_package_render
+
+        render_report = check_package_render(root)
+        meta["render_check"] = render_report
+        summary = render_report.get("summary") if isinstance(render_report, dict) else {}
+        if isinstance(summary, dict) and summary.get("status") in {"failed", "warning"}:
+            warnings.append(
+                "render_check: "
+                f"{summary.get('errors', 0)} error(s), "
+                f"{summary.get('warnings', 0)} warning(s)"
+            )
+            meta["warnings"] = warnings
+    except Exception as exc:  # noqa: BLE001 - conversion must remain inspectable
+        render_report = {
+            "engine": "none",
+            "issues": [],
+            "summary": {
+                "total": 0,
+                "errors": 0,
+                "warnings": 0,
+                "status": "unavailable",
+            },
+            "error": str(exc),
+        }
+        meta["render_check"] = render_report
+
     write_meta(tid, meta)
     try:
         upsert_template_row(tid)
@@ -704,4 +737,5 @@ body {{
         slideCount=len(written_slides),
         imageCount=written_images,
         status=meta["status"],
+        renderCheck=render_report,
     )

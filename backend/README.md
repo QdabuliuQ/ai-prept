@@ -8,6 +8,9 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -U pip setuptools wheel
 pip install -e '.[api]'
+# 可选：启用 Playwright 虚拟浏览器检查
+pip install -e '.[api,browser]'
+python -m playwright install chromium
 
 ai-prept-backend gallery-sync
 ai-prept-backend serve   # http://127.0.0.1:8790
@@ -31,6 +34,10 @@ ai-prept-backend serve   # http://127.0.0.1:8790
 ai-prept-backend capacity ../agent-output/<id>
 ai-prept-backend capacity ../agent-output/<id> --render-baseline
 ai-prept-backend render-check ../agent-output/<id>
+# 强制使用 Playwright（未安装时会自动回退到本机 Chrome）
+ai-prept-backend render-check ../agent-output/<id> --engine playwright --json /tmp/render-report.json
 ```
 
-Remix 只接受 `status=ready` 的契约。生成完成后，服务会用真实 Chrome 对比源模板与成品；新增溢出会自动重写一次，仍失败则恢复对应源文案，并将模板保留为待复核状态。
+`render-check` 会在真实浏览器中检查文字裁切/越界、独立文本槽位重叠、文字与背景同色，以及低对比度。报告中的 `summary.status` 为 `passed`、`warning`、`failed` 或 `unavailable`。
+
+Remix 只接受 `status=ready` 的契约。生成完成后，服务会用真实 Chrome 对比源模板与成品；新增溢出会自动重写一次，仍失败则恢复对应源文案，并将模板保留为待复核状态。编辑器 Agent 默认执行同一视觉检查，也可以通过 `--no-render-check` 跳过。

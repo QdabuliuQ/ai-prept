@@ -362,10 +362,15 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="可选：写入 JSON 报告（数组）",
     )
+    asst.add_argument(
+        "--no-render-check",
+        action="store_true",
+        help="跳过 Playwright/Chrome 视觉检查（默认会检查溢出、布局和颜色）",
+    )
 
     rc = sub.add_parser(
         "render-check",
-        help="用真实浏览器实测模板包文字溢出/出画（Chrome headless 或 Playwright）",
+        help="用真实浏览器实测文字溢出、布局重叠和文字/背景颜色（Chrome headless 或 Playwright）",
     )
     rc.add_argument("package", type=Path, help="模板包目录")
     rc.add_argument(
@@ -740,9 +745,11 @@ def _cmd_render_check(args: argparse.Namespace) -> int:
     prefer = "auto" if args.engine == "auto" else str(args.engine)
     result = check_package_render(package, prefer=prefer)
     issues = result.get("issues") or []
+    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
     print(
         f"[render-check] engine={result.get('engine')} pages={result.get('pages')} "
-        f"issues={len(issues)}"
+        f"issues={len(issues)} errors={summary.get('errors', 0)} "
+        f"warnings={summary.get('warnings', 0)}"
     )
     if result.get("error"):
         print(f"[render-check] note: {result['error']}", file=sys.stderr)
@@ -1000,6 +1007,7 @@ def _cmd_editor_assist(args: argparse.Namespace) -> int:
             page_index=getattr(args, "page_index", None),
             mock=bool(args.mock) or is_mock(),
             target_element=target,
+            render_check=not bool(getattr(args, "no_render_check", False)),
             log=lambda s: print(s, end="" if s.endswith("\n") else "\n", flush=True),
         )
     except Exception as e:

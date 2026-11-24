@@ -84,9 +84,17 @@ def run_editor_assist(
     page_index: int | None = None,
     mock: bool | None = None,
     target_element: dict[str, Any] | None = None,
+    render_check: bool = True,
     log: LogFn | None = None,
 ) -> dict[str, Any]:
-    """Plan + execute editor actions; return aggregated report row."""
+    """Plan + execute editor actions and run a browser visual check.
+
+    The action result remains separate from the visual result: a successful
+    edit is still reported as ``ok`` even when the browser finds a layout issue,
+    because the files have already been written. Callers should use
+    ``validationStatus`` / ``renderCheck`` to decide whether to publish or ask
+    for repair.
+    """
     from templates.element_target import (
         format_target_for_prompt,
         image_filename_from_target,
@@ -249,6 +257,37 @@ def run_editor_assist(
     if not results:
         raise RuntimeError("没有可执行的动作")
 
+    render_report: dict[str, Any] | None = None
+    if render_check:
+        try:
+            from templates.render_check import check_package_render
+
+            render_report = check_package_render(package_dir)
+            summary = render_report.get("summary") or {}
+            _log(
+                log,
+                f"[editor-render-check] engine={render_report.get('engine')} "
+                f"pages={render_report.get('pages')} "
+                f"issues={summary.get('total', len(render_report.get('issues') or []))} "
+                f"errors={summary.get('errors', 0)} warnings={summary.get('warnings', 0)}",
+            )
+        except Exception as exc:  # noqa: BLE001 - edit result must remain inspectable
+            render_report = {
+                "engine": "none",
+                "issues": [],
+                "summary": {
+                    "total": 0,
+                    "errors": 0,
+                    "warnings": 0,
+                    "status": "unavailable",
+                },
+                "error": str(exc),
+            }
+            _log(log, f"[editor-render-check] skipped: {exc}")
+
+    render_summary = (render_report or {}).get("summary") or {}
+    validation_status = str(render_summary.get("status") or "not_run")
+
     # de-dupe preserve order
     def _uniq(items: list[str]) -> list[str]:
         seen: set[str] = set()
@@ -292,6 +331,9 @@ def run_editor_assist(
         "deletedFiles": _uniq(deleted_files),
         "regeneratedImages": _uniq(regenerated_images),
         "targetElement": target,
+        "renderCheck": render_report,
+        "validationStatus": validation_status,
+        "needsReview": validation_status in {"failed", "warning", "unavailable"},
         "error": None
         if ok
         else next(

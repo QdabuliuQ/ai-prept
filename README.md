@@ -69,6 +69,10 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -U pip setuptools wheel
 pip install -e '.[api]'
 
+# 可选：启用 Agent 的 Playwright 视觉检查（文字溢出、布局重叠、颜色对比度）
+pip install -e '.[api,browser]'
+python -m playwright install chromium
+
 ai-prept-backend gallery-sync
 ai-prept-backend serve
 ```

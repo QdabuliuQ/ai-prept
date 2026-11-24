@@ -60,3 +60,53 @@ def test_render_check_clean_page_has_no_issues(tmp_path) -> None:
     if result["engine"] == "none":
         return
     assert result["issues"] == []
+
+
+def test_render_check_reports_text_background_conflict(tmp_path) -> None:
+    if find_browser() is None:
+        return
+    pack = tmp_path / "color-pack"
+    (pack / "slides").mkdir(parents=True)
+    html = """<!DOCTYPE html><html><head><style>
+    html,body{margin:0}
+    .pptx-slide-root{position:relative;width:1920px;height:1080px;overflow:hidden;background:#ffffff}
+    </style></head><body>
+    <div class="pptx-slide-root">
+      <div data-slot="title" data-slot-type="text" style="position:absolute;left:100px;top:100px;width:500px;height:80px;color:#ffffff;background:#ffffff">
+        <span style="font-size:32px">看不见的标题</span>
+      </div>
+    </div>
+    </body></html>"""
+    (pack / "slides" / "a.html").write_text(html, encoding="utf-8")
+    result = check_package_render(pack, prefer="chrome")
+    if result["engine"] == "none":
+        return
+    reasons = {i["reason"] for i in result["issues"]}
+    assert "text_background_conflict" in reasons
+    assert result["summary"]["errors"] >= 1
+
+
+def test_render_check_reports_independent_text_overlap(tmp_path) -> None:
+    if find_browser() is None:
+        return
+    pack = tmp_path / "overlap-pack"
+    (pack / "slides").mkdir(parents=True)
+    html = """<!DOCTYPE html><html><head><style>
+    html,body{margin:0}
+    .pptx-slide-root{position:relative;width:1920px;height:1080px;overflow:hidden;background:#ffffff}
+    </style></head><body>
+    <div class="pptx-slide-root">
+      <div data-slot="a" data-slot-type="text" style="position:absolute;left:100px;top:100px;width:500px;height:160px;color:#111;background:#fff">
+        <span style="font-size:32px">第一段文字</span>
+      </div>
+      <div data-slot="b" data-slot-type="text" style="position:absolute;left:200px;top:140px;width:500px;height:160px;color:#111;background:#fff">
+        <span style="font-size:32px">第二段文字</span>
+      </div>
+    </div>
+    </body></html>"""
+    (pack / "slides" / "a.html").write_text(html, encoding="utf-8")
+    result = check_package_render(pack, prefer="chrome")
+    if result["engine"] == "none":
+        return
+    reasons = {i["reason"] for i in result["issues"]}
+    assert "layout_overlap" in reasons
