@@ -274,6 +274,17 @@ LLM_PROVIDERS: list[dict[str, Any]] = [
             "LLM_API_KEY",
         ],
     },
+    {
+        "id": "custom",
+        "label": "Custom（OpenAI 兼容）",
+        "tier": "heavy",
+        # 自建 / 第三方 OpenAI 兼容网关：实际地址与模型由 CUSTOM_LLM_* 覆盖
+        "baseUrl": "https://gateway.magicrew.io/v1",
+        "models": [
+            {"id": "deepseek-v4.1-flash", "label": "deepseek-v4.1-flash"},
+        ],
+        "keyEnvNames": ["CUSTOM_LLM_API_KEYS", "CUSTOM_LLM_API_KEY"],
+    },
 ]
 
 IMAGE_PROVIDERS: list[dict[str, Any]] = [
@@ -375,6 +386,21 @@ def _mask(key: str) -> str:
     return f"{key[:4]}…{key[-4:]}"
 
 
+def _custom_models(default: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Custom 供应商的模型列表：CUSTOM_LLM_MODELS 覆盖（逗号/分号/换行分隔）。"""
+    raw = _env("CUSTOM_LLM_MODELS")
+    if not raw:
+        return default
+    ids = [
+        part.strip()
+        for part in raw.replace(";", ",").replace("\n", ",").split(",")
+        if part.strip()
+    ]
+    if not ids:
+        return default
+    return [{"id": i, "label": i} for i in ids]
+
+
 def list_llm_providers_public() -> list[dict[str, Any]]:
     out = []
     for p in LLM_PROVIDERS:
@@ -404,6 +430,9 @@ def list_llm_providers_public() -> list[dict[str, Any]]:
             row["baseUrl"] = _env("FREESHARE_BASE_URL") or row["baseUrl"]
         if p["id"] == "workbuddy":
             row["baseUrl"] = _env("WORKBUDDY_BASE_URL") or row["baseUrl"]
+        if p["id"] == "custom":
+            row["baseUrl"] = _env("CUSTOM_LLM_BASE_URL") or row["baseUrl"]
+            row["models"] = _custom_models(row["models"])
         row["configured"] = bool(keys)
         row["keyCount"] = len(keys)
         row["keyHint"] = _mask(keys[0]) if keys else None
@@ -450,7 +479,7 @@ def resolve_llm_selection(
     load_env()
     pid = (provider or "deepseek").strip() or "deepseek"
     found = next((p for p in LLM_PROVIDERS if p["id"] == pid), LLM_PROVIDERS[0])
-    models = found["models"]
+    models = _custom_models(found["models"]) if found["id"] == "custom" else found["models"]
     mid = (model or "").strip() or models[0]["id"]
     if not any(m["id"] == mid for m in models):
         mid = models[0]["id"]
@@ -474,6 +503,8 @@ def resolve_llm_selection(
         base = _env("FREESHARE_BASE_URL") or base
     if pid == "workbuddy":
         base = _env("WORKBUDDY_BASE_URL") or base
+    if pid == "custom":
+        base = _env("CUSTOM_LLM_BASE_URL") or base
     return {
         "provider": found["id"],
         "model": mid,
@@ -616,6 +647,15 @@ def llm_env_for_dual(selection: dict[str, Any]) -> dict[str, str]:
     if selection["provider"] == "freeshare":
         env["FREESHARE_API_KEY"] = keys[0]
         env["FREESHARE_API_KEYS"] = ",".join(keys)
+    if selection["provider"] == "custom":
+        env["CUSTOM_LLM_API_KEY"] = keys[0]
+        env["CUSTOM_LLM_API_KEYS"] = ",".join(keys)
+        # 自建网关没有官方 DeepSeek 兜底：Plan（轻量）也走同一网关，
+        # 否则会落到 .env 里残留的 LLM_LIGHT_* / DEEPSEEK_* key 上。
+        env["LLM_LIGHT_BASE_URL"] = selection["baseUrl"]
+        env["LLM_LIGHT_MODEL"] = selection["model"]
+        env["LLM_LIGHT_API_KEY"] = keys[0]
+        env["LLM_LIGHT_API_KEYS"] = ",".join(keys)
     if selection["provider"] == "workbuddy":
         env["WORKBUDDY_API_KEY"] = keys[0]
         env["WORKBUDDY_API_KEYS"] = ",".join(keys)

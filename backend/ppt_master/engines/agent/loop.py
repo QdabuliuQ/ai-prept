@@ -81,17 +81,28 @@ class AgentEngine(TemplateEngine):
         started = ctx.started_at
         run_id = uuid.uuid4().hex[:8]
         root = self._workdir(spec, run_id)
-        ws = Workspace.create(root, style=spec.style, pages=spec.pages, mode=mode)
 
         if mode == "full":
+            # full 模式由 agent 直接产出 PPT Master 工程：工作区必须就是工程根目录，
+            # 否则页面写进 .agent-runs/<run>/svg_output，而 check_page / export_pptx
+            # 都去 projects/<name>/svg_output 找文件（--page SVG does not exist）。
             try:
-                ws.project = ctx.bridge.init_project(f"ai-prept-agent-{run_id}")
-                log(f"[agent] project={ws.project}\n")
+                root = ctx.bridge.init_project(f"ai-prept-agent-{run_id}")
+                log(f"[agent] project={root}\n")
             except Exception as exc:  # noqa: BLE001
                 log(f"[agent] project init skipped: {exc}\n")
 
+        ws = Workspace.create(root, style=spec.style, pages=spec.pages, mode=mode)
+        if mode == "full":
+            ws.project = root
+
         tools = build_tools(
-            ws, bridge=ctx.bridge, prompt=spec.prompt, mode=mode
+            ws,
+            bridge=ctx.bridge,
+            prompt=spec.prompt,
+            mode=mode,
+            images_enabled=bool(self._images_enabled(spec, ctx)),
+            log=log,
         )
         tools["finish"] = self._finish_tool(ws, spec, ctx, mode=mode)
 
@@ -278,6 +289,17 @@ class AgentEngine(TemplateEngine):
     # Harness helpers
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _images_enabled(spec: GenerateSpec, ctx: RunContext) -> bool:
+        """与流水线同一条判定：skip 明确关 / mock 时不开配图。"""
+        if ctx.mock:
+            return False
+        if spec.with_images is None:
+            from ppt_master.pipeline import _want_images
+
+            return _want_images(skip_images=None)
+        return bool(spec.with_images)
+
     def _verify(
         self, ws: Workspace, spec: GenerateSpec, ctx: RunContext, *, mode: str
     ) -> acceptance_mod.Verdict:
@@ -338,6 +360,7 @@ class AgentEngine(TemplateEngine):
                 quality_gate=spec.quality_gate,
                 strip_unsupported=spec.strip_unsupported,
                 preset_plan=plan,
+                package_only=spec.package_only,
                 log=ctx.log,
             )
         except Exception as exc:  # noqa: BLE001
@@ -373,6 +396,35 @@ class AgentEngine(TemplateEngine):
             ctx.bridge.export_pptx(
                 ws.project or ws.root, pptx_path, flags=["--quick-generate"]
             )
+            if spec.package_only:
+                ctx.log(
+                    f"[agent] package-only：只产出 PPTX，跳过 HTML 转包 → {pptx_path}\n"
+                )
+                return EngineResult(
+                    engine=AGENT_ENGINE,
+                    status="accepted",
+                    ok=True,
+                    template_id=None,
+                    output_dir=str(pptx_path.parent),
+                    project_dir=str(ws.project or ws.root),
+                    quality_gate="agent-verified",
+                    render="pptx",
+                    steps=len(ws.trace),
+                    llm_calls=ws.llm_calls,
+                    wall_seconds=ctx.elapsed(),
+                    usage={"page_tokens": 0, "image_tokens": 0, "image_count": 0},
+                    trace_path=str(ws.root / ".agent" / "trace.jsonl"),
+                    raw={
+                        "ok": True,
+                        "pptx": str(pptx_path),
+                        "output_dir": str(pptx_path.parent),
+                        "format": "pptx",
+                        "render": "pptx",
+                        "package_only": True,
+                        "status": "draft",
+                        "review_state": "pptx_only",
+                    },
+                )
             pack_dir = _convert_to_html_slide(
                 pptx_path,
                 template_id=tid,

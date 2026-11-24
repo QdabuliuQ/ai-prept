@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Zap } from "lucide-react";
+import { AlertTriangle, Zap } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -59,6 +59,11 @@ export function GeneratePanel({
   const [prompt, setPrompt] = useState("");
   const [count, setCount] = useState(1);
   const [pages, setPages] = useState(7);
+  /** pipeline=硬编排流水线（历史行为）；agent=Agent Loop（只出 PPTX） */
+  const [engine, setEngine] = useState<"pipeline" | "agent">("pipeline");
+  /** agent 接管范围：false=只接管规划，true=规划 + 逐页 SVG */
+  const [agentFull, setAgentFull] = useState(false);
+  const [agentMaxSteps, setAgentMaxSteps] = useState(40);
   const [mock, setMock] = useState(false);
   const [skipImage, setSkipImage] = useState(false);
   const [paletteRefine, setPaletteRefine] = useState(false);
@@ -430,6 +435,11 @@ export function GeneratePanel({
           llmModel,
           imageProvider,
           imageModel,
+          engine,
+          agentFull: engine === "agent" ? agentFull : undefined,
+          agentMaxSteps: engine === "agent" ? agentMaxSteps : undefined,
+          // 当前阶段：Agent 线路只产出 PPTX，不建 HTML 模板包
+          packageOnly: engine === "agent" ? true : undefined,
         }),
       });
       setLastJob(data.job);
@@ -441,8 +451,14 @@ export function GeneratePanel({
             .filter(Boolean)
             .join(" · ") || "每包重随"
         : nextIntent || nextStyle;
+      const engineLabel =
+        engine === "agent"
+          ? `Agent Loop${agentFull ? " · 完整接管" : " · 仅规划"}`
+          : "PPT Master";
       toast.success(
-        `已启动 PPT Master ×${n}（${pageCount} 页/包 · ${styleLabel} · SVG）`,
+        `已启动 ${engineLabel} ×${n}（${pageCount} 页/包 · ${styleLabel} · ${
+          engine === "agent" ? "PPTX" : "SVG"
+        }）`,
       );
       onCreated();
     } catch (err) {
@@ -495,6 +511,111 @@ export function GeneratePanel({
                 </span>
               </div>
             </Field>
+
+            <SectionDivider>0. 生成方式</SectionDivider>
+            <Field
+              label="生成引擎"
+              extra={
+                engine === "agent"
+                  ? "Agent Loop：模型自己规划页表、按需调工具，独立验收。当前阶段只产出 PPTX。"
+                  : "硬编排流水线：PPT Master 固定流程（规划 → SVG → 质检 → PPTX → HTML 包）。"
+              }
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <Select
+                  value={engine}
+                  onValueChange={(v) => setEngine(v as "pipeline" | "agent")}
+                >
+                  <SelectTrigger className="w-[320px] max-w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pipeline">
+                      PPT Master 流水线（默认）
+                    </SelectItem>
+                    <SelectItem value="agent">
+                      Agent Loop（只出 PPTX）
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {engine === "agent" ? (
+                  <Badge className={toneBadge.violet}>PPTX only</Badge>
+                ) : (
+                  <Badge className={toneBadge.cyan}>SVG → HTML</Badge>
+                )}
+              </div>
+            </Field>
+
+            {engine === "agent" ? (
+              <>
+                <Alert>
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Agent Loop 线路当前只做到 PPTX</AlertTitle>
+                  <AlertDescription>
+                    <span>
+                      产物写进{" "}
+                      <code className="rounded bg-muted px-1 text-xs">
+                        drafts/
+                      </code>
+                      ，<strong className="font-medium">不建模板包</strong>
+                      、不写{" "}
+                      <code className="rounded bg-muted px-1 text-xs">
+                        template.json
+                      </code>
+                      、不进浏览器转换队列，因此不会出现在模板管理里。HTML
+                      转包这一步暂未接入。
+                    </span>
+                  </AlertDescription>
+                </Alert>
+                <div className="flex flex-wrap items-start gap-6">
+                  <Field
+                    label="Agent 接管范围"
+                    extra={
+                      agentFull
+                        ? "完整：规划 + 逐页 SVG 都由 Agent 写，页数可在 3–12 浮动"
+                        : "仅规划：Agent 只写页表，SVG/样式/导出仍归 PPT Master"
+                    }
+                  >
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={agentFull}
+                        onCheckedChange={(next) => {
+                          setAgentFull(next);
+                          // 完整接管要逐页写 SVG + 反复质检，实测 4 页用掉 43 步；
+                          // 仍是默认 40 时跟着抬高，手填过的值不动。
+                          if (next && agentMaxSteps === 40) setAgentMaxSteps(60);
+                          else if (!next && agentMaxSteps === 60)
+                            setAgentMaxSteps(40);
+                        }}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {agentFull ? "完整生成" : "仅规划"}
+                      </span>
+                    </div>
+                  </Field>
+                  <Field
+                    label="最大步数"
+                    extra="单包 Loop 步数上限（4–80，仅规划默认 40 / 完整生成默认 60）；到顶降级交付，不抛错"
+                  >
+                    <Input
+                      type="number"
+                      min={4}
+                      max={80}
+                      value={agentMaxSteps}
+                      onChange={(e) =>
+                        setAgentMaxSteps(
+                          Math.min(
+                            80,
+                            Math.max(4, Number(e.target.value) || 40),
+                          ),
+                        )
+                      }
+                      className="w-40"
+                    />
+                  </Field>
+                </div>
+              </>
+            ) : null}
 
             <SectionDivider>1. 规模</SectionDivider>
             <div className="flex flex-wrap gap-6">
@@ -870,7 +991,9 @@ export function GeneratePanel({
 
             <div className="pt-2">
               <LoadingButton type="submit" loading={loading}>
-                {`执行 PPT Master ×${count}（${pages} 页/包 · SVG）`}
+                {engine === "agent"
+                  ? `执行 Agent Loop ×${count}（${pages} 页/包 · 只出 PPTX）`
+                  : `执行 PPT Master ×${count}（${pages} 页/包 · SVG）`}
               </LoadingButton>
             </div>
           </form>
@@ -894,24 +1017,25 @@ export function GeneratePanel({
                     <Badge className={toneBadge.cyan}>PPT Master</Badge>
                   )}
                   {(lastJob.pipeline === "ppt-master" ||
-                    lastJob.pipeline == null) && (
-                    <Badge
-                      variant={
-                        lastJob.pptMasterRender === "html"
-                          ? "secondary"
-                          : "outline"
-                      }
-                      className={
-                        lastJob.pptMasterRender === "html"
-                          ? undefined
-                          : toneBadge.cyan
-                      }
-                    >
-                      {lastJob.pptMasterRender === "html"
-                        ? "HTML 直出（历史）"
-                        : "SVG"}
-                    </Badge>
-                  )}
+                    lastJob.pipeline == null) &&
+                    !lastJob.packageOnly && (
+                      <Badge
+                        variant={
+                          lastJob.pptMasterRender === "html"
+                            ? "secondary"
+                            : "outline"
+                        }
+                        className={
+                          lastJob.pptMasterRender === "html"
+                            ? undefined
+                            : toneBadge.cyan
+                        }
+                      >
+                        {lastJob.pptMasterRender === "html"
+                          ? "HTML 直出（历史）"
+                          : "SVG"}
+                      </Badge>
+                    )}
                   {lastJob.visualStyle ? (
                     <span className="text-sm text-muted-foreground">
                       {lastJob.visualStyle}
@@ -962,15 +1086,35 @@ export function GeneratePanel({
                 {lastJob.pages ? ` · ${lastJob.pages} 页/包` : ""}
               </DescRow>
               <DescRow label="生成方式">
-                {lastJob.pipeline === "html-slide"
-                  ? "html-slide（历史）"
-                  : "ppt-master"}
+                {lastJob.engine === "agent" ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge className={toneBadge.violet}>Agent Loop</Badge>
+                    <span className="text-sm text-muted-foreground">
+                      {lastJob.agentFull ? "完整生成" : "仅规划"}
+                      {lastJob.agentMaxSteps
+                        ? ` · 步数上限 ${lastJob.agentMaxSteps}`
+                        : ""}
+                      {lastJob.packageOnly ? " · 只出 PPTX" : ""}
+                      {lastJob.engineStatus
+                        ? ` · ${lastJob.engineStatus}`
+                        : ""}
+                    </span>
+                  </div>
+                ) : lastJob.pipeline === "html-slide" ? (
+                  "html-slide（历史）"
+                ) : (
+                  "ppt-master"
+                )}
               </DescRow>
               <DescRow label="模板 ID">
                 {(lastJob.templateIds && lastJob.templateIds.length > 0
                   ? lastJob.templateIds.join(", ")
-                  : lastJob.templateId) || "生成中…"}
+                  : lastJob.templateId) ||
+                  (lastJob.packageOnly ? "—（只出 PPTX，不入库）" : "生成中…")}
               </DescRow>
+              {lastJob.pptxPath ? (
+                <DescRow label="PPTX">{lastJob.pptxPath}</DescRow>
+              ) : null}
               <DescRow label="输出">{lastJob.outputDir}</DescRow>
             </dl>
             <div className="flex flex-wrap items-center gap-3 pt-1">

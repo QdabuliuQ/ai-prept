@@ -247,3 +247,49 @@ def test_preset_plan_wins_over_internal_planner(
     meta = json.loads((Path(row["output_dir"]) / "template.json").read_text("utf-8"))
     # 包名来自 preset_plan 的 label，而不是 mock 规划器的默认名
     assert "外部规划" in json.dumps(meta, ensure_ascii=False)
+
+
+def test_repair_normalizes_region_bounds_and_padding():
+    """LLM 常把 bounds 写成对象、padding 写成标量：repair 要能归一后通过校验。"""
+    from ppt_master.pipeline import _validate_plan, repair_plan_layout
+
+    plan = {
+        "slides": [
+            {
+                "file": "01-cover.svg",
+                "role": "cover",
+                "title": "封面",
+                "core_message": "一句话",
+                "layout_regions": [
+                    {
+                        "id": "kicker",
+                        "role": "kicker",
+                        "bounds": {"x": 80, "y": 110, "w": 380, "h": 30},
+                        "padding": 0,
+                        "clearance": 28,
+                    },
+                    {
+                        "id": "title",
+                        "role": "headline",
+                        "bounds": [80, 168, 700, 170],
+                        "padding": [8, 8, 8, 8],
+                        "clearance": 36,
+                    },
+                ],
+            }
+        ]
+    }
+    # 原始形状过不了校验，报错信息要点明实际收到的形状
+    try:
+        _validate_plan(plan, 1)
+    except RuntimeError as exc:
+        assert "bounds=对象" in str(exc)
+        assert "padding=单个数字" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("应当校验失败")
+
+    repair_plan_layout(plan)
+    _validate_plan(plan, 1)
+    region = plan["slides"][0]["layout_regions"][0]
+    assert region["bounds"] == [80.0, 110.0, 380.0, 40.0]
+    assert region["padding"] == [0.0, 0.0, 0.0, 0.0]

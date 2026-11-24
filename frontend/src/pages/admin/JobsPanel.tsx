@@ -301,9 +301,15 @@ export function JobsPanel() {
           ? " · 思考开"
           : " · 思考关"
         : "";
+    const agent =
+      row.engine === "agent"
+        ? ` · agent${row.agentFull ? "(full)" : ""}${
+            row.packageOnly ? "/pptx" : ""
+          }`
+        : "";
     return p
-      ? `${n}×${p}页${refine}${repair}${gate}${strip}${palette}${thinking}`
-      : `${n}${refine}${repair}${gate}${strip}${palette}${thinking}`;
+      ? `${n}×${p}页${refine}${repair}${gate}${strip}${palette}${thinking}${agent}`
+      : `${n}${refine}${repair}${gate}${strip}${palette}${thinking}${agent}`;
   };
 
   return (
@@ -396,11 +402,16 @@ export function JobsPanel() {
                         {row.id}
                       </TableCell>
                       <TableCell>
-                        {row.pipeline === "html-slide" ? (
-                          <Badge variant="secondary">HTML</Badge>
-                        ) : (
-                          <Badge className={toneBadge.cyan}>PPT Master</Badge>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1">
+                          {row.pipeline === "html-slide" ? (
+                            <Badge variant="secondary">HTML</Badge>
+                          ) : (
+                            <Badge className={toneBadge.cyan}>PPT Master</Badge>
+                          )}
+                          {row.engine === "agent" ? (
+                            <Badge className={toneBadge.violet}>Agent</Badge>
+                          ) : null}
+                        </div>
                       </TableCell>
                       <TableCell>{jobStatusBadge(row.status)}</TableCell>
                       <TableCell>

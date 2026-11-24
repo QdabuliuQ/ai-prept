@@ -880,10 +880,64 @@ def _separate_pair(
     _clamp_region_to_safe(lower)
 
 
+_REGION_BOUND_KEYS = (
+    ("x", "y", "w", "h"),
+    ("x", "y", "width", "height"),
+    ("left", "top", "width", "height"),
+)
+
+
+def _shape_hint(value: Any) -> str:
+    """报错时描述实际收到的形状，让模型知道该改成什么（而不是只说"非法"）。"""
+    if value is None:
+        return "缺失"
+    if isinstance(value, dict):
+        return f"对象{list(value)[:5]}"
+    if isinstance(value, (list, tuple)):
+        return f"{len(value)} 值序列"
+    if isinstance(value, bool):
+        return "布尔值"
+    if isinstance(value, (int, float)):
+        return f"单个数字 {value}"
+    return f"{type(value).__name__}"
+
+
+def _normalize_region_geometry(region: dict[str, Any]) -> None:
+    """把 bounds / padding 归一成四值数组（就地）。
+
+    LLM 经常写成 ``bounds={"x":80,"y":110,"w":380,"h":30}``、
+    ``padding=0``——语义正确但形状不对，几何检查一律读不出来，
+    最后报"bounds/padding/clearance 非法"却没人知道该改什么。
+    这里先接受这些等价形状，再交给后续校验判断数值是否合理。
+    """
+    bounds = region.get("bounds")
+    if isinstance(bounds, dict) and not isinstance(bounds, (list, tuple)):
+        for keys in _REGION_BOUND_KEYS:
+            if all(k in bounds for k in keys):
+                region["bounds"] = [bounds[k] for k in keys]
+                break
+    elif isinstance(bounds, tuple):
+        region["bounds"] = list(bounds)
+
+    padding = region.get("padding")
+    if padding is None:
+        region["padding"] = [0, 0, 0, 0]
+    elif isinstance(padding, dict):
+        keys = ("top", "right", "bottom", "left")
+        if all(k in padding for k in keys):
+            region["padding"] = [padding[k] for k in keys]
+    elif isinstance(padding, (int, float)) and not isinstance(padding, bool):
+        pad = float(padding)
+        region["padding"] = [pad, pad, pad, pad]
+    elif isinstance(padding, tuple):
+        region["padding"] = list(padding)
+
+
 def _repair_slide_layout_regions(regions: list[Any]) -> list[dict[str, Any]]:
     cleaned = [r for r in regions if isinstance(r, dict)]
     cleaned = _drop_redundant_regions(cleaned)
     for region in cleaned:
+        _normalize_region_geometry(region)
         try:
             clearance = float(region.get("clearance") or 12)
         except (TypeError, ValueError):
@@ -987,7 +1041,11 @@ def _validate_plan(plan: dict[str, Any], requested_pages: int) -> None:
                 clearance = float(region.get("clearance"))
             except (TypeError, ValueError):
                 raise RuntimeError(
-                    f"第 {i} 页 layout region {region_id} 的 bounds/padding/clearance 非法"
+                    f"第 {i} 页 layout region {region_id} 的 bounds/padding/clearance 非法："
+                    "需要 bounds=[x,y,w,h] 四值数组、padding=[top,right,bottom,left] 四值数组、"
+                    f"clearance 数字；实际得到 bounds={_shape_hint(bounds)}、"
+                    f"padding={_shape_hint(padding)}、"
+                    f"clearance={_shape_hint(region.get('clearance'))}"
                 )
             if len(bounds) != 4 or len(padding) != 4:
                 raise RuntimeError(
@@ -1783,6 +1841,38 @@ def _deferred_browser_html_package(
     return out_dir
 
 
+def _pptx_only_row(
+    *,
+    pptx_path: Path,
+    project: Path,
+    quality_gate: str,
+    usage: Any,
+) -> dict[str, Any]:
+    """``package_only`` 的返回行：只有 PPTX，没有模板包。
+
+    ``template_id`` 故意留空——Admin 的 ``upsert_template_row`` 靠它入库，
+    填了会在没有 ``template.json`` 的情况下报错刷日志。
+    """
+    usage_dict = usage.to_dict()
+    return {
+        "ok": True,
+        "template_id": None,
+        "project": str(project),
+        "pptx": str(pptx_path),
+        "output_dir": str(pptx_path.parent),
+        "quality_gate": quality_gate,
+        "export_fallback": None,
+        "page_tokens": int(usage_dict.get("page_tokens") or 0),
+        "image_count": int((usage_dict.get("image") or {}).get("images") or 0),
+        "image_tokens": int(usage_dict.get("image_tokens") or 0),
+        "status": "draft",
+        "review_state": "pptx_only",
+        "format": "pptx",
+        "render": "pptx",
+        "package_only": True,
+    }
+
+
 def _convert_to_html_slide(
     pptx: Path,
     *,
@@ -2083,6 +2173,7 @@ def run_one_package(
     quality_gate: str = "soft",
     strip_unsupported: bool = True,
     preset_plan: dict[str, Any] | None = None,
+    package_only: bool = False,
     log: LogFn | None = None,
 ) -> dict[str, Any]:
     """生成一个模板包。
@@ -2090,6 +2181,10 @@ def run_one_package(
     ``preset_plan`` 是 ``agent`` 引擎 S1 阶段的注入点：外部（agent 的 Plan
     循环）已产出并通过校验的页表，交给本函数直接进入 SVG 授权之后的所有阶段。
     为 ``None`` 时行为与历史完全一致（内部 best-of-N 规划）。
+
+    ``package_only=True`` 时只导出 PPTX 就返回：不建 ``agent-output/{tid}``
+    模板包、不写 ``template.json``、不进浏览器转换队列。返回行的
+    ``template_id`` 为 ``None``（不触发入库），``pptx`` 为文件路径。
 
     传入 ``preset_plan`` 时仍会走 ``_validate_plan`` —— **验收权不放给调用方**，
     这也是"Agent 只接管规划、样式与编译仍归 PPT Master"的落点。
@@ -2489,6 +2584,18 @@ def run_one_package(
                 quality_gate = "gate-fail-no-repair"
             _log(log, f"[pptx] {pptx_path}")
 
+            if package_only:
+                _log(
+                    log,
+                    "[pptx] package-only：跳过 HTML 转包，只保留 PPTX",
+                )
+                return _pptx_only_row(
+                    pptx_path=pptx_path,
+                    project=project,
+                    quality_gate=quality_gate,
+                    usage=usage,
+                )
+
             pack_dir = _convert_to_html_slide(
                 pptx_path,
                 template_id=tid,
@@ -2603,6 +2710,7 @@ def run_ppt_master_pipeline(
     quality_gate: str = "soft",
     strip_unsupported: bool = True,
     preset_plan: dict[str, Any] | None = None,
+    package_only: bool = False,
     log: LogFn | None = None,
 ) -> list[dict[str, Any]]:
     """批量：每包独立跑一遍（仅 SVG → PPTX → 模板包）。
@@ -2634,12 +2742,17 @@ def run_ppt_master_pipeline(
                 quality_gate=quality_gate,
                 strip_unsupported=strip_unsupported,
                 preset_plan=preset_plan if total == 1 else None,
+                package_only=package_only,
                 log=log,
             )
-            row["render"] = "svg"
+            if not package_only:
+                row["render"] = "svg"
             ok += 1
             rows.append(row)
-            _log(log, _progress(i, total, ok, fail, row["template_id"], "ok"))
+            _log(
+                log,
+                _progress(i, total, ok, fail, str(row["template_id"] or "-"), "ok"),
+            )
         except Exception as e:
             fail += 1
             err = str(e)

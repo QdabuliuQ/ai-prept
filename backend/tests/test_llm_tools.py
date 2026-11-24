@@ -220,3 +220,138 @@ def test_pseudo_mode_skips_native(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert reply.mode == "pseudo"
     assert called["native"] is False
+
+
+def test_native_reply_trims_extra_tool_calls():
+    """模型并行发多个 tool_calls 时，assistant 消息只留第一个。
+
+    Agent Loop 每轮只执行一个工具；若历史里留下 2 个 tool_calls 却只回一条
+    role=tool，网关下一轮会直接 400 No tool output found for tool call call_xx。
+    """
+    from types import SimpleNamespace
+
+    from llm import _chat_tools_native
+
+    def _call(i, name):
+        return SimpleNamespace(
+            id=f"call_{i}",
+            function=SimpleNamespace(name=name, arguments="{}"),
+        )
+
+    fake_msg = SimpleNamespace(
+        content=None,
+        tool_calls=[_call(1, "read_style_card"), _call(2, "write_plan")],
+    )
+    fake_resp = SimpleNamespace(
+        choices=[SimpleNamespace(message=fake_msg, finish_reason="tool_calls")],
+        usage=None,
+    )
+
+    class _Client:
+        class chat:
+            class completions:
+                @staticmethod
+                def create(**kwargs):
+                    return fake_resp
+
+    reply = _chat_tools_native(
+        client=_Client(),
+        model="deepseek-v4.1-flash",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"name": "read_style_card", "description": "", "parameters": {}}],
+        temperature=0.0,
+        pool=None,
+    )
+    assert [c.name for c in reply.calls] == ["read_style_card"]
+    assert len(reply.assistant_message["tool_calls"]) == 1
+    assert reply.assistant_message["tool_calls"][0]["id"] == "call_1"
+
+
+def test_tool_output_error_not_treated_as_unsupported():
+    """tool 消息不匹配是真 bug，不应被当成"网关不支持 tools"降级。"""
+    from llm import _looks_like_tool_unsupported
+
+    assert _looks_like_tool_unsupported(
+        RuntimeError(
+            "Error code: 400 - {'error': {'message': 'No tool output found for "
+            "tool call call_01_ET_x', 'code': 'invalid_request_error'}}"
+        )
+    ) is False
+    assert _looks_like_tool_unsupported(RuntimeError("unsupported parameter: tools")) is True
+
+
+def test_custom_gateway_skips_thinking_extra(monkeypatch):
+    """Custom 网关不认 thinking 参数：命中 CUSTOM_LLM_BASE_URL 时不发 extra_body。"""
+    from llm import _chat_extra_body
+
+    monkeypatch.setenv("CUSTOM_LLM_BASE_URL", "https://gateway.magicrew.io/v1")
+    monkeypatch.setenv("LLM_THINKING", "1")
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://gateway.magicrew.io/v1")
+    assert _chat_extra_body("deepseek-v4.1-flash") is None
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.deepseek.com")
+    assert _chat_extra_body("deepseek-v4-flash") == {"thinking": {"type": "enabled"}}
+
+
+def test_request_max_tokens_on_custom_gateway(monkeypatch):
+    """Custom 网关默认输出上限偏小，必须显式传 max_tokens，否则工具参数被截断。"""
+    from llm import _request_max_tokens
+
+    monkeypatch.delenv("LLM_MAX_TOKENS", raising=False)
+    monkeypatch.setenv("CUSTOM_LLM_BASE_URL", "https://gateway.magicrew.io/v1")
+
+    monkeypatch.setenv("LLM_BASE_URL", "https://gateway.magicrew.io/v1")
+    assert _request_max_tokens() == 24576
+
+    # 其它供应商保持原样：不传 max_tokens，交给网关默认值。
+    monkeypatch.setenv("LLM_BASE_URL", "https://api.deepseek.com")
+    assert _request_max_tokens() is None
+
+    # 显式设置则全链路生效，并 clamp 到 256..32768。
+    monkeypatch.setenv("LLM_MAX_TOKENS", "100")
+    assert _request_max_tokens() == 256
+    monkeypatch.setenv("LLM_MAX_TOKENS", "999999")
+    assert _request_max_tokens() == 65536
+
+
+def test_native_tools_pass_max_tokens(monkeypatch):
+    """原生 tools 请求必须带 max_tokens，否则 write_plan 的大 JSON 会被截断。"""
+    import llm as llm_mod
+
+    monkeypatch.setenv("CUSTOM_LLM_BASE_URL", "https://gateway.magicrew.io/v1")
+    monkeypatch.setenv("LLM_BASE_URL", "https://gateway.magicrew.io/v1")
+
+    captured: dict = {}
+
+    class _Msg:
+        content = ""
+        tool_calls = []
+
+    class _Choice:
+        message = _Msg()
+
+    class _Resp:
+        choices = [_Choice()]
+        usage = None
+
+    class _Completions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return _Resp()
+
+    class _Chat:
+        completions = _Completions()
+
+    class _Client:
+        chat = _Chat()
+
+    llm_mod._chat_tools_native(
+        client=_Client(),
+        model="deepseek-v4.1-flash",
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[],
+        temperature=0.3,
+        pool=None,
+    )
+    assert captured["max_tokens"] == 24576

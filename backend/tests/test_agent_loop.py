@@ -373,3 +373,59 @@ def test_tool_error_does_not_kill_loop(tmp_path: Path, monkeypatch: pytest.Monke
     result = AgentEngine().run(_spec(budget=Budget(max_steps=10)), _ctx(tmp_path))
     assert result.ok is True
     assert captured["preset_plan"]
+
+
+# ---------------------------------------------------------------------------
+# package_only：只出 PPTX，不建 HTML 模板包
+# ---------------------------------------------------------------------------
+
+
+def test_package_only_passes_flag_to_pipeline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """plan 模式必须把 package_only 透传给 run_one_package。"""
+    captured = _patch_pipeline(
+        monkeypatch,
+        {
+            "ok": True,
+            "template_id": None,
+            "pptx": "/tmp/out/x.pptx",
+            "output_dir": "/tmp/out",
+            "quality_gate": "passed",
+            "format": "pptx",
+            "render": "pptx",
+            "package_only": True,
+        },
+    )
+    monkeypatch.setattr(
+        llm,
+        "chat_tools",
+        ScriptedLLM(
+            [_reply("write_plan", {"plan": GOOD_PLAN}), _reply("finish", {})]
+        ),
+    )
+
+    result = AgentEngine().run(_spec(package_only=True), _ctx(tmp_path))
+
+    assert captured["package_only"] is True
+    assert result.ok is True
+    assert result.raw.get("package_only") is True
+
+
+def test_package_only_defaults_off_for_pipeline_engine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """不传 package_only 时行为必须与改动前一致：照样建 HTML 包。"""
+    captured = _patch_pipeline(monkeypatch, PIPELINE_ROW)
+    monkeypatch.setattr(
+        llm,
+        "chat_tools",
+        ScriptedLLM(
+            [_reply("write_plan", {"plan": GOOD_PLAN}), _reply("finish", {})]
+        ),
+    )
+
+    result = AgentEngine().run(_spec(), _ctx(tmp_path))
+
+    assert captured["package_only"] is False
+    assert result.template_id == "abc123"

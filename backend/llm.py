@@ -298,6 +298,19 @@ def _llm_thinking_on() -> bool:
     return raw in {"1", "true", "yes", "on", "enabled"}
 
 
+def _on_custom_gateway(base: str) -> bool:
+    """当前 base_url 是否就是 Admin「Custom」那个 OpenAI 兼容网关。
+
+    自定义网关普遍不认 `thinking` / `reasoning_effort` 一类扩展参数，
+    发了就整条请求 400（Unsupported parameter: thinking）。既然地址由
+    CUSTOM_LLM_BASE_URL 决定，命中时直接不发，省掉一次必然失败的往返。
+    """
+    custom = (os.environ.get("CUSTOM_LLM_BASE_URL") or "").strip().lower()
+    if not custom:
+        return False
+    return base.rstrip("/") == custom.rstrip("/")
+
+
 def _thinking_type_extra(model: str) -> dict[str, Any] | None:
     """OpenAI 兼容 `thinking.type`（DeepSeek / 商汤网关模型）。
 
@@ -307,6 +320,8 @@ def _thinking_type_extra(model: str) -> dict[str, Any] | None:
     """
     m = (model or "").lower()
     base = (os.environ.get("LLM_BASE_URL") or "").lower()
+    if _on_custom_gateway(base):
+        return None
     on_sensenova = "sensenova.cn" in base
     if not (
         "deepseek" in m
@@ -388,6 +403,32 @@ def _chat_extra_body(model: str) -> dict[str, Any] | None:
     return extra or None
 
 
+def _request_max_tokens() -> int | None:
+    """单次请求的输出上限。
+
+    默认不传（各厂商默认够用，避免撞上限）。两种情况显式传：
+
+    - 设了 ``LLM_MAX_TOKENS``：全局覆盖；
+    - 走 Admin「Custom」网关：未知网关默认上限偏小，模型还会先花
+      reasoning tokens，写 plan / SVG 的大块 JSON 会被硬截断成半截
+      arguments（表现为工具参数缺字段、校验报"bounds 非法"）。
+
+    24576 是实测出来的安全值：deepseek-v4.1-flash 画一页 SVG 会先花
+    约 1.2 万 reasoning tokens，再写 7k 输出；8192 时 finish_reason
+    直接是 length、content 为空字符串（表现为每页都 "missing <svg> root"）。
+    """
+    raw = (os.environ.get("LLM_MAX_TOKENS") or "").strip()
+    if raw:
+        try:
+            return max(256, min(int(raw), 65536))
+        except ValueError:
+            return None
+    base = (os.environ.get("LLM_BASE_URL") or "").lower()
+    if _on_custom_gateway(base):
+        return 24576
+    return None
+
+
 def _create_chat(
     client: OpenAI,
     *,
@@ -401,6 +442,9 @@ def _create_chat(
         "temperature": temperature,
         "messages": messages,
     }
+    max_tokens = _request_max_tokens()
+    if max_tokens is not None:
+        kwargs["max_tokens"] = max_tokens
     extra = _chat_extra_body(model)
     if extra:
         kwargs["extra_body"] = extra
@@ -408,9 +452,51 @@ def _create_chat(
     def _create(**more: Any):
         return client.chat.completions.create(**kwargs, **more)
 
+    def _rejects_extra_body(exc: BaseException) -> bool:
+        """网关不认 extra_body 里的参数（如自定义网关直接拒绝 thinking）。"""
+        if "extra_body" not in kwargs:
+            return False
+        text = str(exc).lower()
+        return any(
+            token in text
+            for token in (
+                "unsupported parameter",
+                "unsupported_parameter",
+                "unknown parameter",
+                "unrecognized request argument",
+                "unexpected keyword",
+            )
+        )
+
+    def _rejects_max_tokens(exc: BaseException) -> bool:
+        """网关不认 max_tokens（少见，但不能让它整条 400 掉）。"""
+        if "max_tokens" not in kwargs:
+            return False
+        text = str(exc).lower()
+        return "max_tokens" in text or "max_completion_tokens" in text
+
+    def _call(**more: Any):
+        # 未知网关可能整体不支持 thinking/reasoning_effort/max_tokens 这类参数，
+        # 去掉后重试一次，避免整条生成线在该供应商上直接瘫痪。
+        attempt = 0
+        while True:
+            try:
+                return _create(**more)
+            except Exception as e:
+                attempt += 1
+                if attempt > 2:
+                    raise
+                if _rejects_max_tokens(e):
+                    kwargs.pop("max_tokens", None)
+                    continue
+                if _rejects_extra_body(e):
+                    kwargs.pop("extra_body", None)
+                    continue
+                raise
+
     if json_object:
         try:
-            return _create(response_format={"type": "json_object"})
+            return _call(response_format={"type": "json_object"})
         except Exception as e:
             text = str(e).lower()
             if any(
@@ -423,9 +509,9 @@ def _create_chat(
                     "invalid_request",
                 )
             ):
-                return _create()
+                return _call()
             raise
-    return _create()
+    return _call()
 
 
 def _run_with_pool(
@@ -819,6 +905,11 @@ def _tool_list_for_prompt(tools: list[dict[str, Any]]) -> str:
 
 def _looks_like_tool_unsupported(exc: BaseException) -> bool:
     text = str(exc).lower()
+    # 这些不是"网关不支持 tools"，而是我们把消息历史拼错了
+    # （例如 tool_calls 与 role=tool 数量不匹配）。降级只会掩盖真实原因，
+    # 所以直接抛出去让上层记录。
+    if "tool output" in text or "tool_call_id" in text:
+        return False
     return any(token in text for token in _TOOL_UNSUPPORTED_TOKENS)
 
 
@@ -909,14 +1000,25 @@ def _chat_tools_native(
     pool: LlmClientPool | None,
 ) -> ToolReply:
     specs = _tool_specs(tools)
+    max_tokens = _request_max_tokens()
 
     def _once(c: OpenAI) -> ToolReply:
-        resp = c.chat.completions.create(
-            model=model,
-            temperature=temperature,
-            messages=messages,
-            tools=specs,
-        )
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "temperature": temperature,
+            "messages": messages,
+            "tools": specs,
+        }
+        if max_tokens is not None:
+            kwargs["max_tokens"] = max_tokens
+        try:
+            resp = c.chat.completions.create(**kwargs)
+        except Exception as e:
+            # 不认 max_tokens 的网关：去掉再试，别让整条 Agent 线 400。
+            if max_tokens is None or "max_tokens" not in str(e).lower():
+                raise
+            kwargs.pop("max_tokens", None)
+            resp = c.chat.completions.create(**kwargs)
         from usage import record_page_usage
 
         record_page_usage(getattr(resp, "usage", None))
@@ -938,7 +1040,7 @@ def _chat_tools_native(
                     parsed = json.loads(raw_args) if isinstance(raw_args, str) else dict(raw_args)
                 except (json.JSONDecodeError, TypeError, ValueError):
                     parsed = {}
-                call_id = getattr(item, "id", None)
+                call_id = getattr(item, "id", None) or f"call_{len(calls)}"
                 calls.append(
                     ToolCall(
                         name=name,
@@ -953,6 +1055,19 @@ def _chat_tools_native(
                         "function": {"name": name, "arguments": raw_args},
                     }
                 )
+            # Agent Loop 每轮只执行一个工具，因此历史里只保留第一个 tool_call。
+            # 若把模型并行发出的多个 tool_calls 原样留在 assistant 消息里、却只回一条
+            # role=tool，下一轮请求会被网关直接拒绝：
+            #   400 No tool output found for tool call call_xx
+            # 裁剪后数量 1:1 自洽；被裁掉的调用下一轮模型会重新发起。
+            if len(wire_calls) > 1:
+                logger.info(
+                    "模型一次返回 %d 个 tool_calls，仅执行第一个（%s），其余丢弃",
+                    len(wire_calls),
+                    wire_calls[0]["function"]["name"],
+                )
+                calls = calls[:1]
+                wire_calls = wire_calls[:1]
             assistant_message["tool_calls"] = wire_calls
         return ToolReply(
             mode="native",

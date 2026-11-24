@@ -381,7 +381,8 @@ def _append_log(job: dict[str, Any], text: str) -> None:
         job["engineStatus"] = engine_m.group(2)
 
     id_m = re.search(r"id=([^\s]+)", text)
-    if id_m and job.get("progress"):
+    # packageOnly / 无模板包的线路会打 id=None，别把它当模板 ID 收进列表
+    if id_m and job.get("progress") and id_m.group(1) not in ("None", "null", "-"):
         job["progress"]["lastId"] = id_m.group(1)
         job["templateId"] = job.get("templateId") or id_m.group(1)
         ids = list(job.get("templateIds") or [])
@@ -470,6 +471,16 @@ def _spawn(job: dict[str, Any], args: list[str], extra_env: dict[str, str]) -> d
                             # 成功完整包立即入库；需浏览器转 HTML 的 stub 也入库（页数 0，等转换）
                             if tid and r.get("ok"):
                                 upsert_ids.append(str(tid))
+                        # 只出 PPTX 的线路（packageOnly）：没有 template_id，
+                        # 结果只有 pptx 路径，单独收起来给前端展示/下载
+                        pptx_paths = [
+                            str(r["pptx"])
+                            for r in dict_rows
+                            if r.get("pptx") and not r.get("needs_browser_convert")
+                        ]
+                        if pptx_paths:
+                            cur["pptxPaths"] = pptx_paths
+                            cur["pptxPath"] = pptx_paths[0]
                         added = _enqueue_browser_converts(cur, dict_rows)
                         if code == 0 and added:
                             cur["status"] = "awaiting_html"
@@ -519,6 +530,7 @@ def _build_ppt_master_args(
     engine: str = "pipeline",
     agent_full: bool = False,
     agent_max_steps: int = 40,
+    package_only: bool = False,
 ) -> list[str]:
     args = [
         "ppt-master",
@@ -555,6 +567,8 @@ def _build_ppt_master_args(
         args.extend(["--engine", "agent", "--agent-max-steps", str(agent_max_steps)])
         if agent_full:
             args.append("--agent-full")
+        if package_only:
+            args.append("--package-only")
     args.extend(["--", hint])
     return args
 
@@ -720,6 +734,7 @@ def _spawn_per_pack_random(
                 engine=str(job.get("engine") or "pipeline"),
                 agent_full=bool(job.get("agentFull")),
                 agent_max_steps=int(job.get("agentMaxSteps") or 40),
+                package_only=bool(job.get("packageOnly")),
             )
             extra = dict(base_extra)
             from templates.categories import normalize_category
@@ -903,6 +918,11 @@ def start_generate_job(options: dict[str, Any]) -> dict[str, Any]:
         engine = "pipeline"
     agent_full = bool(options.get("agentFull"))
     agent_max_steps = int(options.get("agentMaxSteps") or 40)
+    # 只出 PPTX：Agent 线路当前阶段不接 HTML 转包，故默认开启
+    package_only_raw = options.get("packageOnly")
+    package_only = (
+        bool(package_only_raw) if package_only_raw is not None else engine == "agent"
+    )
     svg_repair = options.get("repairOnFail") is not False
     strip_unsupported = options.get("stripUnsupported") is not False
     palette_refine = bool(options.get("paletteRefine"))
@@ -957,6 +977,7 @@ def start_generate_job(options: dict[str, Any]) -> dict[str, Any]:
         "engine": engine,
         "agentFull": agent_full if engine == "agent" else None,
         "agentMaxSteps": agent_max_steps if engine == "agent" else None,
+        "packageOnly": package_only if engine == "agent" else None,
         "visualStyle": visual_style,
         "styleIntent": style_intent or None,
         "ensureStyle": ensure_style,
@@ -1049,6 +1070,7 @@ def start_generate_job(options: dict[str, Any]) -> dict[str, Any]:
         engine=engine,
         agent_full=agent_full,
         agent_max_steps=agent_max_steps,
+        package_only=package_only,
     )
 
     job["log"] += (

@@ -145,6 +145,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=40,
         help="配合 --engine agent：单包最大步数，默认 40",
     )
+    pm.add_argument(
+        "--package-only",
+        action="store_true",
+        help=(
+            "配合 --engine agent：只导出 PPTX，不建 HTML 模板包"
+            "（不写 template.json、不进浏览器转换队列）"
+        ),
+    )
 
     vs = sub.add_parser(
         "visual-spec",
@@ -564,6 +572,7 @@ def _run_via_engine(
             quality_gate=str(getattr(args, "quality_gate", None) or "soft"),
             # agent 默认只接管规划；--agent-full 才放开 SVG 与页数浮动
             allow_page_reshuffle=full,
+            package_only=bool(getattr(args, "package_only", False)),
             budget=Budget(max_steps=max_steps),
         )
         try:
@@ -689,6 +698,7 @@ def _cmd_ppt_master(args: argparse.Namespace) -> int:
             svg_repair=bool(getattr(args, "svg_repair", True)),
             quality_gate=str(getattr(args, "quality_gate", None) or "soft"),
             strip_unsupported=bool(getattr(args, "strip_unsupported", True)),
+            package_only=bool(getattr(args, "package_only", False)),
             log=log_fn,
         )
     if args.report:

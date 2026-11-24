@@ -38,9 +38,25 @@ PLAN_SYSTEM = """你是这份演示模板的策划者。产出整册页表（JSO
 每页写清楚 role、title、core_message、geometry（空间骨架的一句话描述）、
 visual_hook（这页最该被记住的视觉记忆点）。
 
-layout_regions 决定文字区：每个区域要写 id / role / bounds / padding / clearance，
-位于 40..1240 × 40..680 的安全区内，区域之间留够 clearance。这一条必须严格
-遵守——它决定了文字会不会互相压住。
+layout_regions 决定文字区，格式是硬约定，写错会被直接拒绝：
+
+- `bounds`：四值数组 `[x, y, w, h]`，不是 `{"x":..,"y":..}` 对象
+- `padding`：四值数组 `[top, right, bottom, left]`，不是单个数字
+- `clearance`：单个数字
+- 区域位于 40..1240 × 40..680 的安全区内，区域之间留够 clearance
+
+正确写法（照抄结构，数值按你自己的版面换）：
+
+```
+"layout_regions": [
+  {"id": "title", "role": "page-title", "bounds": [72, 56, 1136, 96],
+   "padding": [12, 16, 12, 16], "clearance": 12},
+  {"id": "body", "role": "body", "bounds": [72, 176, 1136, 448],
+   "padding": [16, 16, 16, 16], "clearance": 16}
+]
+```
+
+这一条必须严格遵守——它决定了文字会不会互相压住。
 
 palette 由你为本册原创，符合所选风格的用色纪律。不要套用固定色板。
 若风格不是科技类，不要用霓虹、HUD、轨道环、粒子这类语汇。
@@ -75,6 +91,19 @@ SVG_SYSTEM = """你是这份模板的版面作者。产出 SVG，它会被转成
 
 主视觉图片由生图负责。你只画结构、色块、局部装饰。
 不要在图上铺近满版的高透明遮罩——需要氛围请写进生图提示词。
+
+## 配图
+
+写完 plan 后、开始画页面前，调用一次 `prepare_images`：
+它按 plan 里的 `need_image` 与页面角色生成图片、写进 `images/`，
+并把每页的 `image_file` 回填进 plan 后返回给你（`ready` / `missing` / 逐页清单）。
+
+- 返回里有 `image_file` 的页：必须引用那一个文件名，路径 `../images/<image_file>`，
+  带 `preserveAspectRatio="xMidYMid slice"`，按返回的 `image_aspect` 决定占位比例。
+- `image_file` 为空的页：禁止任何 `<image>`，用 SVG 形状与文字完成版面。
+
+`write_page` 会核对这件事：该有图却没引用会被当作融合问题拒绝，
+引用了 plan 里没登记的文件名会被清掉。所以**先** prepare_images，**后**画页。
 
 ## 风格
 

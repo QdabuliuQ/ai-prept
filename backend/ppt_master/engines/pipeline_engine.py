@@ -52,6 +52,7 @@ class PipelineEngine(TemplateEngine):
                 svg_repair=spec.svg_repair,
                 quality_gate=spec.quality_gate,
                 strip_unsupported=spec.strip_unsupported,
+                package_only=spec.package_only,
                 log=ctx.log,
             )
         except Exception as exc:  # noqa: BLE001 - 引擎边界统一收敛为结果

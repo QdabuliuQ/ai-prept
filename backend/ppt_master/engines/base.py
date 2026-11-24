@@ -83,6 +83,9 @@ class GenerateSpec:
     # Agent 专用自由度开关；流水线引擎忽略
     allow_page_reshuffle: bool = False
     allow_style_author: bool = False
+    # True = 只导出 PPTX，不建 HTML 模板包（不写 template.json、不进浏览器转换队列）。
+    # 后台「Agent Loop 生成方式」当前阶段只做到 PPTX，转 HTML 暂不接入。
+    package_only: bool = False
     budget: Budget = field(default_factory=Budget)
 
     def __post_init__(self) -> None:

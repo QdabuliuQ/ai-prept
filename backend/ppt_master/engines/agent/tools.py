@@ -173,6 +173,10 @@ def _tool_write_plan(ws: Workspace, prompt: str) -> Tool:
         description=(
             "提交整册规划（页表）。必须包含 template_id / label_zh / palette / slides。"
             "每页需要 file / role / title / core_message / geometry / layout_regions / visual_hook。"
+            "layout_regions 每项形如 "
+            '{"id":"title","role":"page-title","bounds":[x,y,w,h],'
+            '"padding":[top,right,bottom,left],"clearance":12}——'
+            "bounds 与 padding 必须是四值数组（不是对象、不是单个数字），clearance 是数字。"
             "不通过时会返回具体 blocking 原因，按提示修正后重试。"
         ),
         parameters=_obj(
@@ -301,6 +305,118 @@ def _allowed_images(ws: Workspace) -> set[str]:
         return set()
 
 
+def _planned_image(ws: Workspace, rel: str, allowed: set[str]) -> str | None:
+    """本页在 plan 里登记的配图文件名；没登记或文件不存在则 None。"""
+    try:
+        plan = ws.load_plan()
+    except (WorkspaceError, OSError):
+        return None
+    for slide in plan.get("slides") or []:
+        if not isinstance(slide, dict):
+            continue
+        try:
+            if _safe_rel(str(slide.get("file") or "")) != rel:
+                continue
+        except WorkspaceError:
+            continue
+        name = str(slide.get("image_file") or "").strip()
+        if name and name in allowed and (ws.root / "images" / name).is_file():
+            return name
+        return None
+    return None
+
+
+def _tool_prepare_images(
+    ws: Workspace,
+    *,
+    enabled: bool,
+    log: Callable[[str], None] | None = None,
+) -> Tool:
+    def handler(args: dict[str, Any]) -> dict[str, Any]:
+        if not enabled:
+            return {
+                "ok": False,
+                "error": "本次任务关闭了配图（skipImage / mock），所有页面只能用 SVG 画版面",
+            }
+        try:
+            plan = ws.load_plan()
+        except (WorkspaceError, OSError) as exc:
+            return {"ok": False, "error": str(exc)}
+        slides = plan.get("slides")
+        if not isinstance(slides, list) or not slides:
+            return {"ok": False, "error": "plan 里没有 slides，先调用 write_plan"}
+
+        from ppt_master.pipeline import _assign_plan_images, _materialize_plan_images
+
+        try:
+            refs = _assign_plan_images(slides, enable=True)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"分配配图失败：{exc}"}
+        if not refs:
+            ws.save_plan(plan)
+            return {
+                "ok": True,
+                "images": 0,
+                "pages": [],
+                "note": "没有任何页面需要配图：全部用 SVG 形状与文字完成版面，禁止 <image>",
+            }
+
+        style_hint = " ".join(
+            [
+                str(plan.get("visual_style") or ws.style or ""),
+                str(plan.get("label_zh") or ""),
+                str(plan.get("product") or ""),
+            ]
+        ).strip()
+        palette = plan.get("palette") if isinstance(plan.get("palette"), dict) else {}
+        try:
+            _materialize_plan_images(
+                ws.root, refs, style_hint=style_hint, palette=palette, log=log
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"生图失败：{exc}"}
+
+        # 生图后回填 image_file / image_aspect，write_page 与交付阶段都读它。
+        ws.save_plan(plan)
+        present = _allowed_images(ws)
+        pages = [
+            {
+                "file": s.get("file"),
+                "image_file": s.get("image_file"),
+                "image_aspect": s.get("image_aspect"),
+                "image_role": s.get("image_role"),
+            }
+            for s in slides
+            if isinstance(s, dict) and s.get("image_file")
+        ]
+        missing = [p["file"] for p in pages if p["image_file"] not in present]
+        return {
+            "ok": not missing,
+            "images": len(refs),
+            "ready": len(pages) - len(missing),
+            "pages": pages,
+            "missing": missing,
+            "hint": (
+                "有配图的页必须引用一次且只引用这一个文件名："
+                '<image href="../images/<image_file>" preserveAspectRatio="xMidYMid slice" '
+                'data-pptx-role="decoration" data-slot-type="image" data-slot-role="hero-image"/>；'
+                "无配图的页禁止任何 <image>。"
+            ),
+        }
+
+    return Tool(
+        name="prepare_images",
+        description=(
+            "按 plan 里的 need_image / 页面角色生成配图并写入 images/，"
+            "然后把每页的 image_file 回填进 plan 并返回给你。"
+            "写完 plan、开始画页面前调用一次；有配图的页必须引用返回的文件名，"
+            "否则 write_page 的融合检查会拒绝。"
+        ),
+        parameters=_obj({}),
+        handler=handler,
+    )
+
+
 def _tool_write_page(ws: Workspace) -> Tool:
     def handler(args: dict[str, Any]) -> dict[str, Any]:
         rel = str(args.get("file") or "").strip()
@@ -332,7 +448,11 @@ def _tool_write_page(ws: Workspace) -> Tool:
         cleaned = _scrub_svg_image_refs(
             cleaned, allowed=allowed, images_dir=ws.root / "images"
         )
-        issues = list(audit_svg_image_fusion(cleaned))
+        # plan 里给本页登记过配图就必须引用它：prepared_image 是 keyword-only。
+        # 没登记（或生图没成功）时传 None —— 此时页面里任何 <image> 都已被上面的
+        # _scrub_svg_image_refs 清掉，语义是"本页无配图"。
+        prepared = _planned_image(ws, rel, allowed)
+        issues = list(audit_svg_image_fusion(cleaned, prepared_image=prepared))
         issues += [
             f"native-export compatibility: {item}"
             for item in generation_compatibility_issues(cleaned)
@@ -547,8 +667,15 @@ def build_tools(
     bridge: SkillBridge,
     prompt: str,
     mode: str,
+    images_enabled: bool = False,
+    log: Callable[[str], None] | None = None,
 ) -> dict[str, Tool]:
-    """按模式组装工具表。"""
+    """按模式组装工具表。
+
+    ``images_enabled`` 由调用方按 skipImage / mock 决定，只影响
+    ``prepare_images`` 是否可用——关掉时它仍注册，但调用会直接说明原因，
+    比"工具不存在"更容易让模型改走纯 SVG 版面。
+    """
     tools: list[Tool] = [
         _tool_list_styles(bridge),
         _tool_read_style_card(bridge),
@@ -559,6 +686,7 @@ def build_tools(
     ]
     if mode == "full":
         tools += [
+            _tool_prepare_images(ws, enabled=images_enabled, log=log),
             _tool_write_page(ws),
             _tool_read_page(ws),
             _tool_edit_page(ws),

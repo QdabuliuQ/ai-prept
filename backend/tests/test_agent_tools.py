@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -405,3 +406,157 @@ def test_every_tool_has_valid_spec(ws, bridge) -> None:
         params = spec["parameters"]
         assert params["type"] == "object"
         assert "properties" in params
+
+
+# ---------------------------------------------------------------------------
+# write_page：融合审计必须能被真正调用（keyword-only 参数漏传会直接 TypeError）
+# ---------------------------------------------------------------------------
+
+
+def _clean_svg(title: str = "发布会") -> str:
+    rows = "".join(
+        f'    <text x="80" y="{200 + i * 40}" font-size="24" fill="#E9F1F5">要点 {i}</text>\n'
+        for i in range(8)
+    )
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" '
+        'width="1280" height="720" data-pptx-page-role="content">\n'
+        '  <rect id="bg" x="0" y="0" width="1280" height="720" fill="#0A0E14" '
+        'data-pptx-role="background"/>\n'
+        '  <g id="title" data-pptx-bounds="72 56 1136 96">\n'
+        f'    <text x="72" y="120" font-size="56" fill="#F2F5F8">{title}</text>\n'
+        "  </g>\n"
+        '  <g id="body" data-pptx-bounds="72 176 1136 448">\n'
+        f"{rows}"
+        "  </g>\n"
+        "</svg>\n"
+    )
+
+
+def test_write_page_runs_fusion_audit(tmp_path, bridge) -> None:
+    """write_page 的四道门禁要真的跑起来：融合审计漏传参数会 TypeError 而不是正常返回。"""
+    ws = Workspace.create(tmp_path / "fullwp", style="dark-tech", pages=3, mode="full")
+    tools = build_tools(ws, bridge=bridge, prompt="AI 产品发布会", mode="full")
+    result = tools["write_page"].handler({"file": "01_cover.svg", "svg": _clean_svg()})
+    assert result.get("ok") is True, result
+    assert (ws.root / "svg_output" / "01_cover.svg").is_file()
+
+
+def test_write_page_rejects_image_without_prepared_file(tmp_path, bridge) -> None:
+    """full 模式不排版生图：页面引用 <image> 必须被拦下，而不是留个坏引用等导出炸。"""
+    ws = Workspace.create(tmp_path / "fullwp2", style="dark-tech", pages=3, mode="full")
+    tools = build_tools(ws, bridge=bridge, prompt="p", mode="full")
+    svg = _clean_svg().replace(
+        '  <g id="body"',
+        '  <image id="hero" href="../images/hero.png" x="700" y="200" '
+        'width="400" height="300"/>\n  <g id="body"',
+    )
+    result = tools["write_page"].handler({"file": "02_content.svg", "svg": svg})
+    # 引用被 scrub 掉后页面本身仍然合法——关键是不要抛 TypeError / 留坏引用。
+    assert result.get("ok") is True, result
+    written = (ws.root / "svg_output" / "02_content.svg").read_text(encoding="utf-8")
+    assert "hero.png" not in written
+
+
+# ---------------------------------------------------------------------------
+# prepare_images：plan → 生图 → 回填 image_file → write_page 强制引用
+# ---------------------------------------------------------------------------
+
+
+def test_full_mode_registers_prepare_images(ws, bridge) -> None:
+    tools = build_tools(ws, bridge=bridge, prompt="p", mode="full")
+    assert "prepare_images" in tools
+    plan_tools = build_tools(ws, bridge=bridge, prompt="p", mode="plan")
+    assert "prepare_images" not in plan_tools
+
+
+def test_prepare_images_disabled_explains_why(tmp_path, bridge) -> None:
+    """关掉配图时不静默生成，要说清"本次只能用 SVG 画版面"。"""
+    ws = Workspace.create(tmp_path / "noimg", style="dark-tech", pages=3, mode="full")
+    tools = build_tools(ws, bridge=bridge, prompt="p", mode="full", images_enabled=False)
+    tools["write_plan"].handler({"plan": GOOD_PLAN})
+    result = tools["prepare_images"].handler({})
+    assert result["ok"] is False
+    assert "关闭了配图" in result["error"]
+
+
+def test_prepare_images_backfills_plan(tmp_path, bridge, monkeypatch) -> None:
+    """生图结果必须回填进 plan，否则 write_page / 交付阶段读不到 image_file。"""
+    from ppt_master import pipeline
+
+    def fake_materialize(project, refs, *, style_hint, palette, log=None):
+        images = project / "images"
+        images.mkdir(parents=True, exist_ok=True)
+        for name in refs:
+            (images / name).write_bytes(b"\x89PNG\r\n\x1a\n" + name.encode())
+        return []
+
+    monkeypatch.setattr(pipeline, "_materialize_plan_images", fake_materialize)
+    ws = Workspace.create(tmp_path / "img1", style="dark-tech", pages=3, mode="full")
+    tools = build_tools(ws, bridge=bridge, prompt="p", mode="full", images_enabled=True)
+    tools["write_plan"].handler({"plan": GOOD_PLAN})
+    result = tools["prepare_images"].handler({})
+    assert result["ok"] is True, result
+    assert result["missing"] == []
+    # cover + section 角色默认要配图 → 至少 cover 页有 image_file
+    pages = {p["file"]: p for p in result["pages"]}
+    assert pages["01_cover.svg"]["image_file"].endswith(".png")
+    plan = ws.load_plan()
+    cover = next(s for s in plan["slides"] if s["file"] == "01_cover.svg")
+    assert cover["image_file"] == pages["01_cover.svg"]["image_file"]
+
+
+def test_prepare_images_all_pages_opt_out(tmp_path, bridge, monkeypatch) -> None:
+    """全部 need_image=false 时不生图，并明确告知禁用 <image>。"""
+    from ppt_master import pipeline
+
+    def boom(*a, **kw):  # pragma: no cover - 不该被调用
+        raise AssertionError("不该触发生图")
+
+    monkeypatch.setattr(pipeline, "_materialize_plan_images", boom)
+    plan = json.loads(json.dumps(GOOD_PLAN))
+    for slide in plan["slides"]:
+        slide["need_image"] = False
+    ws = Workspace.create(tmp_path / "img2", style="dark-tech", pages=3, mode="full")
+    tools = build_tools(ws, bridge=bridge, prompt="p", mode="full", images_enabled=True)
+    tools["write_plan"].handler({"plan": plan})
+    result = tools["prepare_images"].handler({})
+    assert result["ok"] is True
+    assert result["images"] == 0
+    assert "<image>" in result["note"]
+
+
+def test_write_page_requires_planned_image(tmp_path, bridge, monkeypatch) -> None:
+    """plan 登记了配图、文件也存在时，页面不引用它必须被拒——这是"配图真接上了"的证据。"""
+    from ppt_master import pipeline
+
+    def fake_materialize(project, refs, *, style_hint, palette, log=None):
+        images = project / "images"
+        images.mkdir(parents=True, exist_ok=True)
+        for name in refs:
+            (images / name).write_bytes(b"\x89PNG\r\n\x1a\n" + name.encode())
+        return []
+
+    monkeypatch.setattr(pipeline, "_materialize_plan_images", fake_materialize)
+    ws = Workspace.create(tmp_path / "img3", style="dark-tech", pages=3, mode="full")
+    tools = build_tools(ws, bridge=bridge, prompt="p", mode="full", images_enabled=True)
+    tools["write_plan"].handler({"plan": GOOD_PLAN})
+    prepared = tools["prepare_images"].handler({})
+    cover_img = next(
+        p["image_file"] for p in prepared["pages"] if p["file"] == "01_cover.svg"
+    )
+
+    rejected = tools["write_page"].handler({"file": "01_cover.svg", "svg": _clean_svg()})
+    assert rejected["ok"] is False
+    assert rejected["stage"] == "fusion"
+    assert any(cover_img in msg for msg in rejected["blocking"])
+
+    ok_svg = _clean_svg().replace(
+        '  <g id="body"',
+        f'  <image id="hero" href="../images/{cover_img}" x="700" y="200" '
+        'width="400" height="300" preserveAspectRatio="xMidYMid slice" '
+        'data-pptx-role="decoration" data-slot-type="image" '
+        'data-slot-role="hero-image"/>\n  <g id="body"',
+    )
+    accepted = tools["write_page"].handler({"file": "01_cover.svg", "svg": ok_svg})
+    assert accepted.get("ok") is True, accepted

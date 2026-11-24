@@ -65,6 +65,19 @@ export type GenerateJob = {
   paletteRefine?: boolean;
   packageFormat?: TemplateFormat;
   pipeline?: GeneratePipeline;
+  /** 生成引擎：pipeline=硬编排流水线；agent=Agent Loop */
+  engine?: "pipeline" | "agent";
+  /** Agent 引擎的验收状态：accepted | soft-pass | partial | failed */
+  engineStatus?: string;
+  /** agent：true=规划 + 逐页 SVG；false=仅接管规划 */
+  agentFull?: boolean | null;
+  /** agent：单包最大步数 */
+  agentMaxSteps?: number | null;
+  /** agent：只导出 PPTX，不建 HTML 模板包（当前阶段默认开） */
+  packageOnly?: boolean | null;
+  /** agent 逐包/最终 PPTX 路径（packageOnly 时是唯一产物） */
+  pptxPath?: string;
+  pptxPaths?: string[];
   visualStyle?: string;
   styleIntent?: string;
   ensureStyle?: boolean;
@@ -101,7 +114,6 @@ export type GenerateJob = {
   needsBrowserConvert?: boolean;
   /** Multi-pack: templates still needing browser convert (FIFO). */
   pendingConvertIds?: string[];
-  pptxPath?: string;
   convertTemplateId?: string;
   llmProvider?: string;
   llmModel?: string;
